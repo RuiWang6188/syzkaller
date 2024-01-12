@@ -302,14 +302,17 @@ func main() {
 
 	log.Logf(0, "starting %v fuzzer processes", *flagProcs)
 	for pid := 0; pid < *flagProcs; pid++ {
+		// new a syz-executor for each fuzzer process
 		proc, err := newProc(fuzzer, pid)
 		if err != nil {
 			log.SyzFatalf("failed to create proc: %v", err)
 		}
 		fuzzer.procs = append(fuzzer.procs, proc)
+		// start a goroutine for each syz-executor to handle the fuzzing
 		go proc.loop()
 	}
 
+	// loop for communication with manager via RPC
 	fuzzer.pollLoop()
 }
 
@@ -392,6 +395,7 @@ func (fuzzer *Fuzzer) pollLoop() {
 			log.Logf(0, "alive, executed %v", execTotal)
 			lastPrint = time.Now()
 		}
+		// poll the manager at least every 10 mins
 		if poll || time.Since(lastPoll) > 10*time.Second*fuzzer.timeouts.Scale {
 			needCandidates := fuzzer.workQueue.wantCandidates()
 			if poll && !needCandidates {

@@ -643,6 +643,7 @@ func makeCommand(pid int, bin []string, config *Config, inFile, outFile *os.File
 			}
 		}(c)
 	}
+	// start the executor binary
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start executor binary: %w", err)
 	}

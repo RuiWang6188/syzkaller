@@ -70,6 +70,8 @@ func (proc *Proc) loop() {
 		item := proc.fuzzer.workQueue.dequeue()
 		if item != nil {
 			switch item := item.(type) {
+			// Q: what does not real coverage mean? Not stable?
+			// Q: Where does these different work types come from?
 			case *WorkTriage:
 				proc.triageInput(item)
 			case *WorkCandidate:
@@ -206,6 +208,7 @@ func getSignalAndCover(p *prog.Prog, info *ipc.ProgInfo, call int) (signal.Signa
 	return signal.FromRaw(inf.Signal, signalPrio(p, inf, call)), inf.Cover
 }
 
+// execute those programs just been smashed and added to the corpus
 func (proc *Proc) smashInput(item *WorkSmash) {
 	if proc.fuzzer.faultInjectionEnabled && item.call != -1 {
 		proc.failCall(item.p, item.call)
@@ -251,6 +254,7 @@ func (proc *Proc) executeHintSeed(p *prog.Prog, call int) {
 	})
 }
 
+// invoke the executor to execute the fuzzing program
 func (proc *Proc) execute(execOpts *ipc.ExecOpts, p *prog.Prog, flags ProgTypes, stat Stat) *ipc.ProgInfo {
 	info := proc.executeRaw(execOpts, p, stat)
 	if info == nil {

@@ -89,9 +89,9 @@ func startRPCServer(mgr *Manager) (*RPCServer, error) {
 }
 
 func (serv *RPCServer) Connect(a *rpctype.ConnectArgs, r *rpctype.ConnectRes) error {
+	// Q: why there's no presence of this line in the stdout of manager?
 	log.Logf(1, "fuzzer %v connected", a.Name)
 	serv.stats.vmRestarts.inc()
-
 	if serv.canonicalModules == nil {
 		serv.canonicalModules = cover.NewCanonicalizer(a.Modules, serv.cfg.Cover)
 		serv.modules = a.Modules
