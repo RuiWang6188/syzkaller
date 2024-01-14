@@ -200,3 +200,30 @@ type RunTestDoneArgs struct {
 	Info   []*ipc.ProgInfo
 	Error  string
 }
+
+type MutateSuggestionArgs struct {
+	Hash string
+}
+
+type MutateTypes int
+
+const (
+	MutateInsert    MutateTypes = 0
+	MutateChangeArg MutateTypes = 1
+)
+
+type Insert struct {
+	InsertPos   int
+	SyscallName string
+}
+
+type ChangeArg struct {
+	ArgIndex int
+	NewValue string
+}
+
+type MutateSuggestionRes struct {
+	Type       MutateTypes
+	InsertInfo Insert
+	ChangeInfo ChangeArg
+}
