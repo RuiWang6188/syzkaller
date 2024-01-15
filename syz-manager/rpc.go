@@ -415,7 +415,7 @@ func (serv *RPCServer) MutateSuggestion(a *rpctype.MutateSuggestionArgs, r *rpct
 		return nil
 	}
 
-	fmt.Printf("read dir %v success", mutationDir)
+	// fmt.Printf("read dir %v success", mutationDir)
 
 	r.Suggestions = make([]rpctype.MultiMutateSuggestion, 0)
 	selectedMutations := make([]string, 0)
@@ -460,7 +460,7 @@ func (serv *RPCServer) MutateSuggestion(a *rpctype.MutateSuggestionArgs, r *rpct
 					singleSugguest.Lines = append(singleSugguest.Lines, rpctype.SingleMutateSuggestion{
 						Type: rpctype.MutateInsert,
 						InsertInfo: rpctype.InsertCall{
-							InsertPos:   insertcallIndex,
+							InsertPos:   lineNumber,
 							SyscallName: words[insertcallIndex+1],
 						},
 					})
@@ -469,9 +469,6 @@ func (serv *RPCServer) MutateSuggestion(a *rpctype.MutateSuggestionArgs, r *rpct
 			r.Suggestions = append(r.Suggestions, singleSugguest)
 		}
 	}
-
-	fmt.Printf("number of mutations: %v\n", len(r.Suggestions))
-	fmt.Printf("r: %v\n", r.Suggestions)
 
 	return nil
 }

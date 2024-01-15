@@ -171,13 +171,13 @@ func (proc *Proc) loopTest() {
 		// log.Logf(1, "prog: %v", p)
 		// send the hash to manager via RPC
 
-		a := rpctype.MutateSuggestionArgs{Hash: hash}
-		r := rpctype.MutateSuggestionRes{Suggestions: make([]rpctype.MultiMutateSuggestion, 0)}
+		a := &rpctype.MutateSuggestionArgs{Hash: hash}
+		r := &rpctype.MutateSuggestionRes{}
 		if err := proc.fuzzer.manager.Call("Manager.MutateSuggestion", a, r); err != nil {
 			log.SyzFatalf("failed to call Manager.MutateSuggestion(): %v", err)
 		}
 
-		log.Logf(1, "received mutate suggestion: %v", r)
+		log.Logf(1, "received mutate suggestion count: %v", len(r.Suggestions))
 		for _, suggest := range r.Suggestions {
 			for _, s := range suggest.Lines {
 				switch s.Type {
