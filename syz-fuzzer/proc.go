@@ -172,20 +172,24 @@ func (proc *Proc) loopTest() {
 		// send the hash to manager via RPC
 
 		a := rpctype.MutateSuggestionArgs{Hash: hash}
-		r := rpctype.MutateSuggestionRes{}
+		r := rpctype.MutateSuggestionRes{Suggestions: make([]rpctype.MultiMutateSuggestion, 0)}
 		if err := proc.fuzzer.manager.Call("Manager.MutateSuggestion", a, r); err != nil {
 			log.SyzFatalf("failed to call Manager.MutateSuggestion(): %v", err)
 		}
 
 		log.Logf(1, "received mutate suggestion: %v", r)
-		switch r.Type {
-		case rpctype.MutateInsert:
-			// TODO: add logic for handling insert syscall mutation
-			// need to use p
-		case rpctype.MutateChangeArg:
+		for _, suggest := range r.Suggestions {
+			for _, s := range suggest.Lines {
+				switch s.Type {
+				case rpctype.MutateInsert:
+					// TODO: add logic for handling insert syscall mutation
+					// need to use p
+				case rpctype.MutateChangeArg:
 
-		default:
-			log.Fatalf("unknown mutate suggestion type: %v", r.Type)
+				default:
+					log.Fatalf("unknown mutate suggestion type: %v", s.Type)
+				}
+			}
 		}
 	}
 }

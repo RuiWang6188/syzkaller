@@ -210,9 +210,10 @@ type MutateTypes int
 const (
 	MutateInsert    MutateTypes = 0
 	MutateChangeArg MutateTypes = 1
+	// add more mutations types here
 )
 
-type Insert struct {
+type InsertCall struct {
 	InsertPos   int
 	SyscallName string
 }
@@ -222,8 +223,16 @@ type ChangeArg struct {
 	NewValue string
 }
 
-type MutateSuggestionRes struct {
+type SingleMutateSuggestion struct {
 	Type       MutateTypes
-	InsertInfo Insert
+	InsertInfo InsertCall
 	ChangeInfo ChangeArg
+	// add more mutation types here
+}
+type MultiMutateSuggestion struct {
+	Lines []SingleMutateSuggestion
+}
+
+type MutateSuggestionRes struct {
+	Suggestions []MultiMutateSuggestion
 }

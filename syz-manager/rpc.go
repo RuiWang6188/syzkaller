@@ -4,9 +4,12 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"math/rand"
 	"net"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -395,4 +398,80 @@ func (serv *RPCServer) shutdownInstance(name string) []byte {
 	}
 	delete(serv.fuzzers, name)
 	return fuzzer.machineInfo
+}
+
+func (serv *RPCServer) MutateSuggestion(a *rpctype.MutateSuggestionArgs, r *rpctype.MutateSuggestionRes) error {
+	serv.mu.Lock()
+	defer serv.mu.Unlock()
+
+	hash := a.Hash
+
+	// load the mutation file from the local file with this hash
+	mutationDir := "/data/rui/fuzz/data/data/project/tmp/collectdiff/dataset/" + hash
+
+	mutateFiles, err := os.ReadDir(mutationDir)
+	if err != nil {
+		log.Fatalf("failed to read dir %v: %v", mutationDir, err)
+		return nil
+	}
+
+	fmt.Printf("read dir %v success", mutationDir)
+
+	r.Suggestions = make([]rpctype.MultiMutateSuggestion, 0)
+	selectedMutations := make([]string, 0)
+
+	for len(selectedMutations) < 50 {
+		// randomly seelct a file
+		rndIndex := serv.rnd.Intn(len(mutateFiles))
+		currMutation := mutateFiles[rndIndex]
+
+		// read the content of the file
+		filePath := mutationDir + "/" + currMutation.Name()
+		content, err := os.ReadFile(filePath)
+		if err != nil {
+			log.Fatalf("failed to read file %v: %v", filePath, err)
+			continue
+		}
+
+		// TODO: only consider the insertcall mutation for now, remove the second condition later
+		if strings.Contains(string(content), "insertcall") && !strings.Contains(string(content), "mutatearg") {
+			selectedMutations = append(selectedMutations, currMutation.Name())
+			singleSugguest := rpctype.MultiMutateSuggestion{Lines: make([]rpctype.SingleMutateSuggestion, 0)}
+
+			// Count the number of lines containing 'insertcall' and get the next string in each line
+			scanner := bufio.NewScanner(strings.NewReader(string(content)))
+			lineNumber := 0
+			for scanner.Scan() {
+				lineNumber++
+				insertcallIndex := -1
+				line := scanner.Text()
+				if strings.Contains(line, "insertcall") {
+					words := strings.Fields(line)
+					for i, w := range words {
+						if w == "insertcall" {
+							insertcallIndex = i
+						}
+					}
+					// TODO: double check if the next argument is the syscall name
+					// fmt.Printf("File: %s, Line %d contains 'insertcall': %v\n", currMutation.Name(), lineNumber, words[insertcallIndex+1])
+					// for i := 0; i < len(words)-1; i++ {
+					// 	fmt.Printf("Next string in line: %s\n", words[i+1])
+					// }
+					singleSugguest.Lines = append(singleSugguest.Lines, rpctype.SingleMutateSuggestion{
+						Type: rpctype.MutateInsert,
+						InsertInfo: rpctype.InsertCall{
+							InsertPos:   insertcallIndex,
+							SyscallName: words[insertcallIndex+1],
+						},
+					})
+				}
+			}
+			r.Suggestions = append(r.Suggestions, singleSugguest)
+		}
+	}
+
+	fmt.Printf("number of mutations: %v\n", len(r.Suggestions))
+	fmt.Printf("r: %v\n", r.Suggestions)
+
+	return nil
 }
