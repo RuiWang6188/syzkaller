@@ -11,6 +11,7 @@ import (
 	"github.com/google/syzkaller/pkg/host"
 	"github.com/google/syzkaller/pkg/ipc"
 	"github.com/google/syzkaller/pkg/signal"
+	"github.com/google/syzkaller/prog"
 )
 
 type Input struct {
@@ -205,35 +206,6 @@ type MutateSuggestionArgs struct {
 	Hash string
 }
 
-type MutateTypes int
-
-const (
-	MutateInsertCall MutateTypes = 0
-	MutateChangeArg  MutateTypes = 1
-	// add more mutations types here
-)
-
-type InsertCall struct {
-	InsertPos   int
-	SyscallName string
-}
-
-type ChangeArg struct {
-	ArgIndex int
-	NewValue string
-}
-
-type SingleMutateSuggestion struct {
-	Type       MutateTypes
-	InsertInfo InsertCall
-	ChangeInfo ChangeArg
-	// add more mutation types here
-}
-// TODOs: watch out for index shift 
-type MultiMutateSuggestion struct {
-	Lines []SingleMutateSuggestion
-}
-
 type MutateSuggestionRes struct {
-	Suggestions []MultiMutateSuggestion
+	Suggestions []prog.MultiMutateSuggestion
 }

@@ -11,8 +11,37 @@ import (
 	"sort"
 
 	"github.com/google/syzkaller/pkg/image"
-	// "github.com/google/syzkaller/pkg/rpctype"
 )
+
+type MutateTypes int
+
+const (
+	MutateInsertCall MutateTypes = 0
+	MutateChangeArg  MutateTypes = 1
+	// add more mutations types here
+)
+
+type InsertCall struct {
+	InsertPos   int
+	SyscallName string
+}
+
+type ChangeArg struct {
+	ArgIndex int
+	NewValue string
+}
+
+type SingleMutateSuggestion struct {
+	Type       MutateTypes
+	InsertInfo InsertCall
+	ChangeInfo ChangeArg
+	// add more mutation types here
+}
+// TODOs: watch out for index shift 
+type MultiMutateSuggestion struct {
+	Lines []SingleMutateSuggestion
+}
+
 
 // Maximum length of generated binary blobs inserted into the program.
 const maxBlobLen = uint64(100 << 10)

@@ -294,7 +294,8 @@ func main() {
 	for _, id := range r.CheckResult.EnabledCalls[sandbox] {
 		calls[target.Syscalls[id]] = true
 	}
-	fuzzer.choiceTable = target.BuildChoiceTable(fuzzer.corpus, calls)
+	// fuzzer.choiceTable = target.BuildChoiceTable(fuzzer.corpus, calls)
+	fuzzer.choiceTable = target.BuildChoiceTable(nil, nil)
 
 	if r.CoverFilterBitmap != nil {
 		fuzzer.execOpts.Flags |= ipc.FlagEnableCoverageFilter

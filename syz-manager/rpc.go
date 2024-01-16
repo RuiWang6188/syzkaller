@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -417,7 +418,7 @@ func (serv *RPCServer) MutateSuggestion(a *rpctype.MutateSuggestionArgs, r *rpct
 
 	// fmt.Printf("read dir %v success", mutationDir)
 
-	r.Suggestions = make([]rpctype.MultiMutateSuggestion, 0)
+	r.Suggestions = make([]prog.MultiMutateSuggestion, 0)
 	selectedMutations := make([]string, 0)
 
 	for len(selectedMutations) < 50 {
@@ -433,10 +434,10 @@ func (serv *RPCServer) MutateSuggestion(a *rpctype.MutateSuggestionArgs, r *rpct
 			continue
 		}
 
-		// TODO: only consider the insertcall mutation for now, remove the second condition later
+		// TODOs: only consider the insertcall mutation for now, remove the second condition later
 		if strings.Contains(string(content), "insertcall") && !strings.Contains(string(content), "mutatearg") {
 			selectedMutations = append(selectedMutations, currMutation.Name())
-			singleSugguest := rpctype.MultiMutateSuggestion{Lines: make([]rpctype.SingleMutateSuggestion, 0)}
+			singleSugguest := prog.MultiMutateSuggestion{Lines: make([]prog.SingleMutateSuggestion, 0)}
 
 			// Count the number of lines containing 'insertcall' and get the next string in each line
 			scanner := bufio.NewScanner(strings.NewReader(string(content)))
@@ -444,24 +445,23 @@ func (serv *RPCServer) MutateSuggestion(a *rpctype.MutateSuggestionArgs, r *rpct
 			for scanner.Scan() {
 				lineNumber++
 				insertcallIndex := -1
+				syscallNameIndex := -1
 				line := scanner.Text()
 				if strings.Contains(line, "insertcall") {
 					words := strings.Fields(line)
 					for i, w := range words {
 						if w == "insertcall" {
 							insertcallIndex = i
+						} else if insertcallIndex != -1 && syscallNameIndex == -1 && isValidSyscallName(w) {
+							syscallNameIndex = i
 						}
 					}
-					// TODO: double check if the next argument is the syscall name
-					// fmt.Printf("File: %s, Line %d contains 'insertcall': %v\n", currMutation.Name(), lineNumber, words[insertcallIndex+1])
-					// for i := 0; i < len(words)-1; i++ {
-					// 	fmt.Printf("Next string in line: %s\n", words[i+1])
-					// }
-					singleSugguest.Lines = append(singleSugguest.Lines, rpctype.SingleMutateSuggestion{
-						Type: rpctype.MutateInsertCall,
-						InsertInfo: rpctype.InsertCall{
+					// fmt.Printf("File: %s, Line %d contains 'insertcall': %v\n", currMutation.Name(), lineNumber, words[syscallNameIndex])
+					singleSugguest.Lines = append(singleSugguest.Lines, prog.SingleMutateSuggestion{
+						Type: prog.MutateInsertCall,
+						InsertInfo: prog.InsertCall{
 							InsertPos:   lineNumber,
-							SyscallName: words[insertcallIndex+1],
+							SyscallName: words[syscallNameIndex],
 						},
 					})
 				}
@@ -471,4 +471,15 @@ func (serv *RPCServer) MutateSuggestion(a *rpctype.MutateSuggestionArgs, r *rpct
 	}
 
 	return nil
+}
+
+func isValidSyscallName(s string) bool {
+	// Define a regular expression pattern for 'r' followed by a digit
+	pattern := `^r\d+$`
+
+	// Compile the regular expression
+	regExp := regexp.MustCompile(pattern)
+
+	// Check if the string matches the pattern
+	return !regExp.MatchString(s)
 }

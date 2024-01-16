@@ -163,13 +163,12 @@ func (proc *Proc) loopML() {
 
 	log.Logf(1, "rawProgs initialized")
 
+	// rebuild a default choice table for this ML-based fuzzing loop
+
 	for i := 0; ; i++ {
 		for hash, data := range rawProgs {
 			// deserialize the data into Prog
-			log.Logf(1, "before deserializeInput")
-			// TODOs: fix the deserializeInput error: panic when checking disabled calls
 			p := proc.fuzzer.deserializeInput(data)
-			log.Logf(1, "after deserializeInput")
 			// log.Logf(1, "hash: %v", hash)
 			log.Logf(1, "prog: %v", p.Calls)
 			// send the hash to manager via RPC
@@ -184,11 +183,10 @@ func (proc *Proc) loopML() {
 			// temporarily put the mutation logic here
 			// fuzzerSnapshot := proc.fuzzer.snapshot()
 			// corpus := fuzzerSnapshot.corpus
-			// TODOs: maybe need to add those hardcoded progs to the corpus first?
 			for _, suggest := range r.Suggestions {
 				for _, s := range suggest.Lines {
 					switch s.Type {
-					case rpctype.MutateInsertCall:
+					case prog.MutateInsertCall:
 						log.Logf(1, "ML suggest: InsertCall")
 						insertLine := s.InsertInfo.InsertPos
 						insertCall := s.InsertInfo.SyscallName
@@ -200,7 +198,7 @@ func (proc *Proc) loopML() {
 						// c = generateCall()
 						// insertBefore(p, insertLine, c)
 
-					case rpctype.MutateChangeArg:
+					case prog.MutateChangeArg:
 						log.Logf(1, "ML suggest: ChangeArg")
 					default:
 						log.Fatalf("unknown mutate suggestion")
