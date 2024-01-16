@@ -208,8 +208,8 @@ type MutateSuggestionArgs struct {
 type MutateTypes int
 
 const (
-	MutateInsert    MutateTypes = 0
-	MutateChangeArg MutateTypes = 1
+	MutateInsertCall MutateTypes = 0
+	MutateChangeArg  MutateTypes = 1
 	// add more mutations types here
 )
 
@@ -229,6 +229,7 @@ type SingleMutateSuggestion struct {
 	ChangeInfo ChangeArg
 	// add more mutation types here
 }
+// TODOs: watch out for index shift 
 type MultiMutateSuggestion struct {
 	Lines []SingleMutateSuggestion
 }

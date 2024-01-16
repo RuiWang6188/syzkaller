@@ -458,7 +458,7 @@ func (serv *RPCServer) MutateSuggestion(a *rpctype.MutateSuggestionArgs, r *rpct
 					// 	fmt.Printf("Next string in line: %s\n", words[i+1])
 					// }
 					singleSugguest.Lines = append(singleSugguest.Lines, rpctype.SingleMutateSuggestion{
-						Type: rpctype.MutateInsert,
+						Type: rpctype.MutateInsertCall,
 						InsertInfo: rpctype.InsertCall{
 							InsertPos:   lineNumber,
 							SyscallName: words[insertcallIndex+1],

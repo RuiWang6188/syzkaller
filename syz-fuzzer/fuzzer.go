@@ -310,7 +310,7 @@ func main() {
 		fuzzer.procs = append(fuzzer.procs, proc)
 		// start a goroutine for each syz-executor to handle the fuzzing
 		// go proc.loop()
-		go proc.loopTest()
+		go proc.loopML()
 	}
 
 	// loop for communication with manager via RPC
@@ -500,6 +500,7 @@ func (fuzzer *Fuzzer) deserializeInput(inp []byte) *prog.Prog {
 	return p
 }
 
+// TODOs: double check this function
 func (fuzzer *Fuzzer) checkDisabledCalls(p *prog.Prog) {
 	for _, call := range p.Calls {
 		if !fuzzer.choiceTable.Enabled(call.Meta.ID) {

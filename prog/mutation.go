@@ -11,10 +11,34 @@ import (
 	"sort"
 
 	"github.com/google/syzkaller/pkg/image"
+	// "github.com/google/syzkaller/pkg/rpctype"
 )
 
 // Maximum length of generated binary blobs inserted into the program.
 const maxBlobLen = uint64(100 << 10)
+
+// TODO: fix the rpctype import cycle. Where should I define the types
+// Mutate program p based on ML-based feedback.
+//
+// p:           The program to mutate.
+// suggestions:    The feedback from the ML model.
+// corpus:	  The entire corpus, including original program p.
+// func (p *Prog) MutateML(suggestions []rpctype.MultiMutateSuggestion, corpus []*Prog) {
+// 	for _, suggest := range suggestions {
+// 		for _, s := range suggest.Lines {
+// 			switch s.Type {
+// 			case rpctype.MutateInsertCall:
+// 				log.Logf(1, "suggest: MutateInsertCall")
+
+// 			case rpctype.MutateChangeArg:
+// 				log.Logf(1, "suggest: MutateChangeArg")
+
+// 			default:
+// 				log.Fatalf("unknown mutate suggestion type: %v", s.Type)
+// 			}
+// 		}
+// 	}
+// }
 
 // Mutate program p.
 //
