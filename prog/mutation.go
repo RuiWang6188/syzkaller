@@ -22,8 +22,8 @@ const (
 )
 
 type InsertCall struct {
-	InsertPos   int
-	SyscallName string
+	InsertLineNumber int
+	SyscallName      string
 }
 
 type ChangeArg struct {
@@ -37,37 +37,47 @@ type SingleMutateSuggestion struct {
 	ChangeInfo ChangeArg
 	// add more mutation types here
 }
-// TODOs: watch out for index shift 
+
+// TODOs: watch out for index shift
 type MultiMutateSuggestion struct {
 	Lines []SingleMutateSuggestion
 }
 
-
 // Maximum length of generated binary blobs inserted into the program.
 const maxBlobLen = uint64(100 << 10)
 
-// TODO: fix the rpctype import cycle. Where should I define the types
 // Mutate program p based on ML-based feedback.
-//
+
 // p:           The program to mutate.
+// rs:          Random source.
+// ct:          ChoiceTable for syscalls.
 // suggestions:    The feedback from the ML model.
-// corpus:	  The entire corpus, including original program p.
-// func (p *Prog) MutateML(suggestions []rpctype.MultiMutateSuggestion, corpus []*Prog) {
-// 	for _, suggest := range suggestions {
-// 		for _, s := range suggest.Lines {
-// 			switch s.Type {
-// 			case rpctype.MutateInsertCall:
-// 				log.Logf(1, "suggest: MutateInsertCall")
+// corpus:      The entire corpus, including original program p.
+func (p *Prog) MutateML(rs rand.Source, ct *ChoiceTable, suggestions MultiMutateSuggestion, corpus []*Prog) {
+	r := newRand(p.Target, rs)
+	ctx := &mutatorML{
+		p:       p,
+		r:       r,
+		ct:      ct,
+		corpus:  corpus,
+		suggest: SingleMutateSuggestion{},
+	}
 
-// 			case rpctype.MutateChangeArg:
-// 				log.Logf(1, "suggest: MutateChangeArg")
-
-// 			default:
-// 				log.Fatalf("unknown mutate suggestion type: %v", s.Type)
-// 			}
-// 		}
-// 	}
-// }
+	for _, s := range suggestions.Lines {
+		ctx.suggest = s
+		switch s.Type {
+		case MutateInsertCall:
+			ok := ctx.insertCallML()
+			if !ok {
+				fmt.Printf("ML suggest: InsertCall failed\n")
+			}
+		case MutateChangeArg:
+			fmt.Printf("ML suggest: ChangeArg\n")
+		default:
+			fmt.Printf("unknown mutate suggestion\n")
+		}
+	}
+}
 
 // Mutate program p.
 //
@@ -122,6 +132,14 @@ type mutator struct {
 	ct       *ChoiceTable // ChoiceTable for syscalls.
 	noMutate map[int]bool // Set of IDs of syscalls which should not be mutated.
 	corpus   []*Prog      // The entire corpus, including original program p.
+}
+
+type mutatorML struct {
+	p       *Prog
+	r       *randGen
+	ct      *ChoiceTable
+	corpus  []*Prog
+	suggest SingleMutateSuggestion
 }
 
 // This function selects a random other program p0 out of the corpus, and
@@ -207,6 +225,23 @@ func (ctx *mutator) insertCall() bool {
 	for len(p.Calls) > ctx.ncalls {
 		p.RemoveCall(idx)
 	}
+	return true
+}
+
+// insert a new call wit ML-based feedback (fixed point and fixed syscall name)
+func (ctx *mutatorML) insertCallML() bool {
+	p, r := ctx.p, ctx.r
+	idx, syscallName := ctx.suggest.InsertInfo.InsertLineNumber-1, ctx.suggest.InsertInfo.SyscallName
+	if idx >= len(p.Calls) {
+		fmt.Printf("insert line number out of bound\n")
+		return false
+	}
+
+	c := p.Calls[idx]
+	s := analyze(ctx.ct, ctx.corpus, p, c)
+	call := r.generateCallML(s, p, syscallName)
+	p.insertBeforeML(c, call)
+	// TODOs: need to check the insert position in the end to make sure the index shift
 	return true
 }
 

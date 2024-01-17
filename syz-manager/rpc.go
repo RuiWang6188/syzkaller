@@ -460,8 +460,8 @@ func (serv *RPCServer) MutateSuggestion(a *rpctype.MutateSuggestionArgs, r *rpct
 					singleSugguest.Lines = append(singleSugguest.Lines, prog.SingleMutateSuggestion{
 						Type: prog.MutateInsertCall,
 						InsertInfo: prog.InsertCall{
-							InsertPos:   lineNumber,
-							SyscallName: words[syscallNameIndex],
+							InsertLineNumber: lineNumber,
+							SyscallName:      words[syscallNameIndex],
 						},
 					})
 				}

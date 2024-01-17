@@ -348,6 +348,22 @@ func (p *Prog) insertBefore(c *Call, calls []*Call) {
 	p.Calls = newCalls
 }
 
+func (p *Prog) insertBeforeML(c *Call, call *Call) {
+	idx := 0
+	for ; idx < len(p.Calls); idx++ {
+		if p.Calls[idx] == c {
+			break
+		}
+	}
+
+	var newCalls []*Call
+	newCalls = append(newCalls, p.Calls[:idx]...)
+	newCalls = append(newCalls, call)
+	newCalls = append(newCalls, p.Calls[idx])
+	newCalls = append(newCalls, p.Calls[idx+1:]...)
+	p.Calls = newCalls
+}
+
 // replaceArg replaces arg with arg1 in a program.
 func replaceArg(arg, arg1 Arg) {
 	switch a := arg.(type) {

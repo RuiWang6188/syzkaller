@@ -310,8 +310,8 @@ func main() {
 		}
 		fuzzer.procs = append(fuzzer.procs, proc)
 		// start a goroutine for each syz-executor to handle the fuzzing
-		// go proc.loop()
-		go proc.loopML()
+		go proc.loop()
+		// go proc.loopML()
 	}
 
 	// loop for communication with manager via RPC

@@ -559,6 +559,8 @@ func (r *randGen) nOutOf(n, outOf int) bool {
 }
 
 func (r *randGen) generateCall(s *state, p *Prog, insertionPoint int) []*Call {
+	// TODELETE
+	fmt.Printf("generateCall()")
 	biasCall := -1
 	if insertionPoint > 0 {
 		// Choosing the base call is based on the insertion point of the new calls sequence.
@@ -570,7 +572,26 @@ func (r *randGen) generateCall(s *state, p *Prog, insertionPoint int) []*Call {
 	}
 	idx := s.ct.choose(r.Rand, biasCall)
 	meta := r.target.Syscalls[idx]
+	// TODELETE
+	fmt.Printf("target.Syscalls: %v\n", r.target.Syscalls)
+	fmt.Printf("meta: %v\n", meta)
 	return r.generateParticularCall(s, meta)
+}
+
+func (r *randGen) generateCallML(s *state, p *Prog, syscallName string) *Call {
+	var meta *Syscall
+	for _, m := range r.target.Syscalls {
+		if m.Name == syscallName {
+			meta = m
+			break
+		}
+	}
+	calls := r.generateParticularCall(s, meta)
+	if len(calls) != 1 {
+		panic("generateCallML: len(calls) != 1")
+	}
+
+	return calls[0]
 }
 
 func (r *randGen) generateParticularCall(s *state, meta *Syscall) (calls []*Call) {

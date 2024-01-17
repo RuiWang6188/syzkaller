@@ -168,9 +168,9 @@ func (proc *Proc) loopML() {
 	for i := 0; ; i++ {
 		for hash, data := range rawProgs {
 			// deserialize the data into Prog
-			p := proc.fuzzer.deserializeInput(data)
+			prog := proc.fuzzer.deserializeInput(data)
 			// log.Logf(1, "hash: %v", hash)
-			log.Logf(1, "prog: %v", p.Calls)
+			log.Logf(1, "prog: %v", prog.Calls)
 			// send the hash to manager via RPC
 
 			a := &rpctype.MutateSuggestionArgs{Hash: hash}
@@ -180,30 +180,14 @@ func (proc *Proc) loopML() {
 			}
 
 			// log.Logf(1, "received mutate suggestion count: %v", len(r.Suggestions))
-			// temporarily put the mutation logic here
-			// fuzzerSnapshot := proc.fuzzer.snapshot()
-			// corpus := fuzzerSnapshot.corpus
+			ct := proc.fuzzer.choiceTable
+			fuzzerSnapshot := proc.fuzzer.snapshot()
 			for _, suggest := range r.Suggestions {
-				for _, s := range suggest.Lines {
-					switch s.Type {
-					case prog.MutateInsertCall:
-						log.Logf(1, "ML suggest: InsertCall")
-						insertLine := s.InsertInfo.InsertPos
-						insertCall := s.InsertInfo.SyscallName
-						log.Logf(1, "insertLine: %v", insertLine)
-						log.Logf(1, "insertCall: %v", insertCall)
-
-						// create a call with name `insertCall` and appropriate args
-						// var c *prog.Call
-						// c = generateCall()
-						// insertBefore(p, insertLine, c)
-
-					case prog.MutateChangeArg:
-						log.Logf(1, "ML suggest: ChangeArg")
-					default:
-						log.Fatalf("unknown mutate suggestion")
-					}
-				}
+				p := prog.Clone()
+				p.MutateML(proc.rnd, ct, suggest, fuzzerSnapshot.corpus)
+				log.Logf(1, "#%v: ML mutated", proc.pid)
+				// TODOs: check the last argument
+				proc.executeAndCollide(proc.execOpts, p, ProgNormal, StatFuzz)
 			}
 		}
 	}
