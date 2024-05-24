@@ -219,7 +219,7 @@ func readCSV(filePath string) (MLProgMutateInfo, error) {
 
 	// Step 4: Find the record with 'mutated' label marked as true
 	if len(records) < 2 {
-		return MLProgMutateInfo{}, fmt.Errorf("Number of records is less than 1")
+		return MLProgMutateInfo{}, fmt.Errorf("number of records is less than 1")
 	}
 	offset, err := strconv.Atoi(records[1][0])
 	if err != nil {
@@ -310,9 +310,9 @@ func findArg(p *Prog, modelOutput MLProgMutateInfo) (Arg, ArgCtx) {
 	fmt.Println("syscall name: ", c.Meta.Name)
 
 	ma := &mutationArgs{target: p.Target}
-	ForeachArg(c, ma.collectArg)
+	ForeachArgNonstop(c, ma.collectArg)
 	if len(ma.args) == 0 {
-		panic("no args found in ma")
+		panic("no args found in mutation args")
 	}
 
 	argIdxOffset := argIndex - callIndex
@@ -333,49 +333,46 @@ func (ctx *mutator) mutateArg() bool {
 		return false
 	}
 
-	idx := chooseCall(p, r)
+	modelOutput, err := getModelOutput(p, r)
+	if err != nil {
+		fmt.Println("get model output failed: ", err)
+		return false
+	}
+
+	idx := modelOutput.ProgCallIndex
+
 	if idx < 0 {
 		return false
 	}
 	c := p.Calls[idx]
 	if ctx.noMutate[c.Meta.ID] {
+		fmt.Println("no mutate syscall: ", c.Meta.Name)
 		return false
 	}
 	updateSizes := true
-	// TODO: double check if we still need this loop as well as chooseCall???
-	for stop, ok := false, false; !stop; stop = ok && r.oneOf(3) {
-		ok = true
-		ma := &mutationArgs{target: p.Target}
-		ForeachArg(c, ma.collectArg)
-		if len(ma.args) == 0 {
-			return false
-		}
-		modelOutput, err := getModelOutput(p, r)
-		s := analyze(ctx.ct, ctx.corpus, p, c)
-		if err != nil {
-			return false
-		}
-		arg, argCtx := findArg(p, modelOutput)
 
-		// arg, argCtx := ma.chooseArg(r.Rand)
-		calls, ok1 := p.Target.mutateArg(r, s, arg, argCtx, &updateSizes)
-		if !ok1 {
-			ok = false
-			continue
-		}
-		p.insertBefore(c, calls)
-		idx += len(calls)
-		for len(p.Calls) > ctx.ncalls {
-			idx--
-			p.RemoveCall(idx)
-		}
-		if idx < 0 || idx >= len(p.Calls) || p.Calls[idx] != c {
-			panic(fmt.Sprintf("wrong call index: idx=%v calls=%v p.Calls=%v ncalls=%v",
-				idx, len(calls), len(p.Calls), ctx.ncalls))
-		}
-		if updateSizes {
-			p.Target.assignSizesCall(c)
-		}
+	s := analyze(ctx.ct, ctx.corpus, p, c)
+
+	arg, argCtx := findArg(p, modelOutput)
+	// arg, argCtx := ma.chooseArg(r.Rand)
+
+	calls, ok := p.Target.mutateArg(r, s, arg, argCtx, &updateSizes)
+	if !ok {
+		fmt.Println("mutateArg failed")
+		return false
+	}
+	p.insertBefore(c, calls)
+	idx += len(calls)
+	for len(p.Calls) > ctx.ncalls {
+		idx--
+		p.RemoveCall(idx)
+	}
+	if idx < 0 || idx >= len(p.Calls) || p.Calls[idx] != c {
+		panic(fmt.Sprintf("wrong call index: idx=%v calls=%v p.Calls=%v ncalls=%v",
+			idx, len(calls), len(p.Calls), ctx.ncalls))
+	}
+	if updateSizes {
+		p.Target.assignSizesCall(c)
 	}
 	return true
 }
