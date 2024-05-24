@@ -5,13 +5,29 @@ package prog
 
 import (
 	"encoding/binary"
+	"encoding/csv"
 	"fmt"
 	"math"
 	"math/rand"
+	"os"
+	"path"
+	"path/filepath"
 	"sort"
+	"strconv"
 
+	"github.com/google/syzkaller/pkg/hash"
 	"github.com/google/syzkaller/pkg/image"
 )
+
+type MLProgMutateInfo struct {
+	ProgCallIndex int // the syscall index in the program
+	CallIndex     int // the syscall index in the original label file without offset
+	CallName      string
+	ArgIndex      int // the argument index in the original label file without offset
+	ArgName       string
+	ArgType       string
+	Mutated       bool
+}
 
 // Maximum length of generated binary blobs inserted into the program.
 const maxBlobLen = uint64(100 << 10)
@@ -168,6 +184,148 @@ func (ctx *mutator) removeCall() bool {
 	return true
 }
 
+func collectSubdirectories(dir string) ([]string, error) {
+	var subdirs []string
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if info.IsDir() && path != dir {
+			subdirs = append(subdirs, path)
+		}
+
+		return nil
+	})
+	return subdirs, err
+}
+
+func readCSV(filePath string) (MLProgMutateInfo, error) {
+	// Step 1: Open the CSV file
+	file, err := os.Open(filePath)
+	if err != nil {
+		return MLProgMutateInfo{}, fmt.Errorf("could not open file %s: %v", filePath, err)
+	}
+	defer file.Close()
+
+	// Step 2: Create a CSV reader
+	reader := csv.NewReader(file)
+
+	// Step 3: Read all records from the CSV file
+	records, err := reader.ReadAll()
+	if err != nil {
+		return MLProgMutateInfo{}, fmt.Errorf("could not read CSV file: %v", err)
+	}
+
+	// Step 4: Find the record with 'mutated' label marked as true
+	if len(records) < 2 {
+		return MLProgMutateInfo{}, fmt.Errorf("Number of records is less than 1")
+	}
+	offset, err := strconv.Atoi(records[1][0])
+	if err != nil {
+		return MLProgMutateInfo{}, fmt.Errorf("could not convert offset to int: %v", err)
+	}
+
+	progCallIdx := -1
+	prevCallIdx := -1
+	prevSyscallName := ""
+	for _, record := range records[1:] {
+		if record[2] == "0" {
+			progCallIdx += 1
+			prevCallIdx, err = strconv.Atoi(record[0])
+			if err != nil {
+				return MLProgMutateInfo{}, fmt.Errorf("could not convert call index to int: %v", err)
+			}
+			prevCallIdx -= offset
+			prevSyscallName = record[1]
+		}
+
+		if record[3] == "true" {
+			// fmt.Println("Record found: ", record)
+
+			index, err := strconv.Atoi(record[0])
+			if err != nil {
+				return MLProgMutateInfo{}, fmt.Errorf("could not convert index to int: %v", err)
+			}
+			return MLProgMutateInfo{
+				ProgCallIndex: progCallIdx,
+				CallIndex:     prevCallIdx,
+				CallName:      prevSyscallName,
+				ArgIndex:      index - offset,
+				ArgName:       record[1],
+				ArgType:       record[2],
+				Mutated:       true,
+			}, nil
+		}
+
+	}
+	return MLProgMutateInfo{}, fmt.Errorf("no record found")
+}
+
+func getModelOutput(p *Prog, r *randGen) (MLProgMutateInfo, error) {
+	// 1. find the corresponding base prog dir in the corpus
+	modelOutputDir := "/data/ruitmp/dev-findCorrespondingArg"
+	progHash := hash.String(p.Serialize())
+	progHashDir := path.Join(modelOutputDir, progHash)
+	// 2. choose a random mutation under the progHashDir
+	// TODO: double check this
+	subdirs, err := collectSubdirectories(progHashDir)
+	if err != nil {
+		panic(err)
+	}
+	if len(subdirs) == 0 {
+		return MLProgMutateInfo{}, fmt.Errorf("no mutation subdirectories found in %s", subdirs)
+	}
+
+	selectedMutation := subdirs[r.Intn(len(subdirs))]
+	csvFilePath := path.Join(selectedMutation, "prog.node.label.csv")
+	if _, err := os.Stat(csvFilePath); os.IsNotExist(err) {
+		return MLProgMutateInfo{}, fmt.Errorf("no csv file found in %s", csvFilePath)
+	}
+	// 3. read the prog node label csv file and find the record with mutated label
+	modelOutput, err := readCSV(csvFilePath)
+	if err != nil {
+		return MLProgMutateInfo{}, err
+	}
+
+	return modelOutput, nil
+}
+
+func findArg(p *Prog, modelOutput MLProgMutateInfo) (Arg, ArgCtx) {
+	nodeType := modelOutput.ArgType
+	argIndex := modelOutput.ArgIndex
+	callIndex := modelOutput.CallIndex
+	progCallIndex := modelOutput.ProgCallIndex
+
+	if nodeType != "1" {
+		panic("ML model mutated node is not an argument node")
+	}
+
+	if progCallIndex < 0 || progCallIndex >= len(p.Calls) {
+		panic("progCallIndex is out of bounds")
+	}
+
+	c := p.Calls[progCallIndex]
+
+	fmt.Println("syscall name: ", c.Meta.Name)
+
+	ma := &mutationArgs{target: p.Target}
+	ForeachArg(c, ma.collectArg)
+	if len(ma.args) == 0 {
+		panic("no args found in ma")
+	}
+
+	argIdxOffset := argIndex - callIndex
+	if argIdxOffset < 0 || argIdxOffset >= len(ma.args) {
+		panic("argIdxOffset is out of bound")
+	}
+
+	fmt.Println("arg type: ", ma.args[argIdxOffset].arg.Type().Name())
+	fmt.Println("arg name from model: ", modelOutput.ArgName)
+
+	return ma.args[argIdxOffset].arg, ma.args[argIdxOffset].ctx
+}
+
 // Mutate an argument of a random call.
 func (ctx *mutator) mutateArg() bool {
 	p, r := ctx.p, ctx.r
@@ -184,6 +342,7 @@ func (ctx *mutator) mutateArg() bool {
 		return false
 	}
 	updateSizes := true
+	// TODO: double check if we still need this loop as well as chooseCall???
 	for stop, ok := false, false; !stop; stop = ok && r.oneOf(3) {
 		ok = true
 		ma := &mutationArgs{target: p.Target}
@@ -191,8 +350,14 @@ func (ctx *mutator) mutateArg() bool {
 		if len(ma.args) == 0 {
 			return false
 		}
+		modelOutput, err := getModelOutput(p, r)
 		s := analyze(ctx.ct, ctx.corpus, p, c)
-		arg, argCtx := ma.chooseArg(r.Rand)
+		if err != nil {
+			return false
+		}
+		arg, argCtx := findArg(p, modelOutput)
+
+		// arg, argCtx := ma.chooseArg(r.Rand)
 		calls, ok1 := p.Target.mutateArg(r, s, arg, argCtx, &updateSizes)
 		if !ok1 {
 			ok = false
