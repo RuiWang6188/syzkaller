@@ -14,6 +14,7 @@ import (
 	"io"
 
 	"github.com/google/syzkaller/pkg/image"
+	"github.com/google/syzkaller/pkg/log"
 )
 
 type state struct {
@@ -116,6 +117,18 @@ func ForeachSubArg(arg Arg, f func(Arg, *ArgCtx)) {
 	foreachArgImpl(arg, &ArgCtx{}, f)
 }
 
+func ForeachArgNonstop(c *Call, f func(Arg, *ArgCtx)) {
+	ctx := &ArgCtx{}
+	if c.Ret != nil {
+		foreachArgImplNonstop(c.Ret, ctx, f)
+	}
+	ctx.Parent = &c.Args
+	ctx.Fields = c.Meta.Args
+	for _, arg := range c.Args {
+		foreachArgImplNonstop(arg, ctx, f)
+	}
+}
+
 func ForeachArg(c *Call, f func(Arg, *ArgCtx)) {
 	ctx := &ArgCtx{}
 	if c.Ret != nil {
@@ -169,6 +182,52 @@ func foreachArgImpl(arg Arg, ctx *ArgCtx, f func(Arg, *ArgCtx)) {
 		}
 	case *UnionArg:
 		foreachArgImpl(a.Option, ctx, f)
+	}
+}
+
+func foreachArgImplNonstop(arg Arg, ctx *ArgCtx, f func(Arg, *ArgCtx)) {
+	ctx0 := *ctx
+	defer func() { *ctx = ctx0 }()
+	f(arg, ctx)
+	switch a := arg.(type) {
+	case *ResultArg:
+		log.Logf(0, "foreachArgImplNonstop: ResultArg: %v", a)
+	case *DataArg:
+		log.Logf(0, "foreachArgImplNonstop: DataArg: %v", a)
+	case *GroupArg:
+		overlayField := 0
+		if typ, ok := a.Type().(*StructType); ok {
+			ctx.Parent = &a.Inner
+			ctx.Fields = typ.Fields
+			overlayField = typ.OverlayField
+		}
+		var totalSize uint64
+		for i, arg1 := range a.Inner {
+			if i == overlayField {
+				ctx.Offset = ctx0.Offset
+			}
+			foreachArgImplNonstop(arg1, ctx, f)
+			size := arg1.Size()
+			ctx.Offset += size
+			if totalSize < ctx.Offset {
+				totalSize = ctx.Offset - ctx0.Offset
+			}
+		}
+		claimedSize := a.Size()
+		varlen := a.Type().Varlen()
+		if varlen && totalSize > claimedSize || !varlen && totalSize != claimedSize {
+			panic(fmt.Sprintf("bad group arg size %v, should be <= %v for %#v type %#v",
+				totalSize, claimedSize, a, a.Type().Name()))
+		}
+	case *PointerArg:
+		log.Logf(0, "foreachArgImplNonstop: PointerArg: %v", a)
+		if a.Res != nil {
+			ctx.Base = a
+			ctx.Offset = 0
+			foreachArgImplNonstop(a.Res, ctx, f)
+		}
+	case *UnionArg:
+		foreachArgImplNonstop(a.Option, ctx, f)
 	}
 }
 
