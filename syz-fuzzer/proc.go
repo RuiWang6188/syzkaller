@@ -67,34 +67,67 @@ func (proc *Proc) loop() {
 		generatePeriod = 2
 	}
 	for i := 0; ; i++ {
+		log.Logf(0, "fuzzer corpus size: %v", len(proc.fuzzer.corpus))
+		for _, p := range proc.fuzzer.corpus {
+			log.Logf(0, "corpus program: %v", hash.String(p.Serialize()))
+		}
+		log.Logf(0, "[before dequeue] workQueue size: %v", len(proc.fuzzer.workQueue.triageCandidate)+len(proc.fuzzer.workQueue.candidate)+len(proc.fuzzer.workQueue.triage)+len(proc.fuzzer.workQueue.smash))
 		item := proc.fuzzer.workQueue.dequeue()
 		if item != nil {
 			switch item := item.(type) {
 			case *WorkTriage:
+				log.Logf(0, "triage input: %v", hash.String(item.p.Serialize()))
 				proc.triageInput(item)
 			case *WorkCandidate:
+				log.Logf(0, "execute input: %v", hash.String(item.p.Serialize()))
 				proc.execute(proc.execOpts, item.p, item.flags, StatCandidate)
 			case *WorkSmash:
+				log.Logf(0, "smash input: %v", hash.String(item.p.Serialize()))
 				proc.smashInput(item)
 			default:
 				log.SyzFatalf("unknown work type: %#v", item)
 			}
-			continue
+
+			log.Logf(0, "[after dequeue] workQueue size: %v", len(proc.fuzzer.workQueue.triageCandidate)+len(proc.fuzzer.workQueue.candidate)+len(proc.fuzzer.workQueue.triage)+len(proc.fuzzer.workQueue.smash))
+			// TODO (Rui): restore this
+			if len(proc.fuzzer.corpus) == 0 {
+				continue
+			}
 		}
 
 		ct := proc.fuzzer.choiceTable
+
 		fuzzerSnapshot := proc.fuzzer.snapshot()
+		log.Logf(0, "fuzzerSnapshot.corpus size: %v", len(fuzzerSnapshot.corpus))
+
+		for _, p := range fuzzerSnapshot.corpus {
+			log.Logf(0, "corpus program: %v", hash.String(p.Serialize()))
+		}
+
 		if len(fuzzerSnapshot.corpus) == 0 || i%generatePeriod == 0 {
+			log.Logf(0, "Generate a new prog")
 			// Generate a new prog.
 			p := proc.fuzzer.target.Generate(proc.rnd, prog.RecommendedCalls, ct)
 			log.Logf(1, "#%v: generated", proc.pid)
 			proc.executeAndCollide(proc.execOpts, p, ProgNormal, StatGenerate)
 		} else {
 			// Mutate an existing prog.
-			p := fuzzerSnapshot.chooseProgram(proc.rnd).Clone()
+			log.Logf(0, "Mutate an existing prog")
+			p := fuzzerSnapshot.chooseProfiledProgram(proc.rnd).Clone()
+			if p == nil {
+				log.Logf(0, "No profiled program found in chooseProfiledProgram()")
+				continue
+			}
+			// p := fuzzerSnapshot.chooseProgram(proc.rnd).Clone()
+			log.Logf(0, "[BM] chosen program: %v", hash.String(p.Serialize()))
 			p.Mutate(proc.rnd, prog.RecommendedCalls, ct, proc.fuzzer.noMutate, fuzzerSnapshot.corpus)
 			log.Logf(1, "#%v: mutated", proc.pid)
 			proc.executeAndCollide(proc.execOpts, p, ProgNormal, StatFuzz)
+
+			log.Logf(0, "[after mutate and executeAndCollide] fuzzer corpus size: %v", len(proc.fuzzer.corpus))
+			for _, p := range proc.fuzzer.corpus {
+				log.Logf(0, "corpus program: %v", hash.String(p.Serialize()))
+			}
 		}
 	}
 }
@@ -213,9 +246,15 @@ func (proc *Proc) smashInput(item *WorkSmash) {
 	if proc.fuzzer.comparisonTracingEnabled && item.call != -1 {
 		proc.executeHintSeed(item.p, item.call)
 	}
+	if !checkProgProfiled(item.p) {
+		log.Logf(0, "WONT SMASH: program not profiled: %v", hash.String(item.p.Serialize()))
+		return // Don't smash unprofiled programs.
+	}
+
 	fuzzerSnapshot := proc.fuzzer.snapshot()
 	for i := 0; i < 100; i++ {
 		p := item.p.Clone()
+		log.Logf(0, "[BM] to be smashed program: %v", hash.String(p.Serialize()))
 		p.Mutate(proc.rnd, prog.RecommendedCalls, proc.fuzzer.choiceTable, proc.fuzzer.noMutate, fuzzerSnapshot.corpus)
 		log.Logf(1, "#%v: smash mutated", proc.pid)
 		proc.executeAndCollide(proc.execOpts, p, ProgNormal, StatSmash)

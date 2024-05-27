@@ -210,6 +210,8 @@ func RunManager(cfg *mgrconfig.Config) {
 	mgr.initHTTP()  // Creates HTTP server.
 	mgr.collectUsedFiles()
 
+	log.Logf(0, "[1] corpus size: %v", len(mgr.corpus))
+
 	// Create RPC server for fuzzers.
 	mgr.serv, err = startRPCServer(mgr)
 	if err != nil {
@@ -273,6 +275,9 @@ func RunManager(cfg *mgrconfig.Config) {
 		<-vm.Shutdown
 		return
 	}
+
+	log.Logf(0, "[2] corpus size: %v", len(mgr.corpus))
+
 	mgr.vmLoop()
 }
 
@@ -598,8 +603,13 @@ func (mgr *Manager) preloadCorpus() {
 	}
 	mgr.corpusDB = corpusDB
 
-	if seedDir := filepath.Join(mgr.cfg.Syzkaller, "sys", mgr.cfg.TargetOS, "test"); osutil.IsExist(seedDir) {
+	// log.Logf(0, "seedDir: %v", filepath.Join(mgr.cfg.Syzkaller, "sys", mgr.cfg.TargetOS, "test"))
+
+	if seedDir := "/data/rui/task/10/base_progs"; osutil.IsExist(seedDir) {
+		log.Logf(0, "seedDir exists")
+
 		seeds, err := os.ReadDir(seedDir)
+
 		if err != nil {
 			log.Fatalf("failed to read seeds dir: %v", err)
 		}
@@ -651,6 +661,8 @@ func (mgr *Manager) loadCorpus() {
 	for _, seed := range mgr.seeds {
 		mgr.loadProg(seed, true, false)
 	}
+	log.Logf(0, "len(mgr.candidates): %v", len(mgr.candidates))
+	log.Logf(0, "Corpus size: %v", corpusSize)
 	log.Logf(0, "%-24v: %v/%v", "seeds", len(mgr.candidates)-corpusSize, len(mgr.seeds))
 	mgr.seeds = nil
 

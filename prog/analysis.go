@@ -14,6 +14,7 @@ import (
 	"io"
 
 	"github.com/google/syzkaller/pkg/image"
+	"github.com/google/syzkaller/pkg/log"
 )
 
 type state struct {
@@ -189,6 +190,10 @@ func foreachArgImplNonstop(arg Arg, ctx *ArgCtx, f func(Arg, *ArgCtx)) {
 	defer func() { *ctx = ctx0 }()
 	f(arg, ctx)
 	switch a := arg.(type) {
+	case *ResultArg:
+		log.Logf(0, "foreachArgImplNonstop: ResultArg: %v", a)
+	case *DataArg:
+		log.Logf(0, "foreachArgImplNonstop: DataArg: %v", a)
 	case *GroupArg:
 		overlayField := 0
 		if typ, ok := a.Type().(*StructType); ok {
@@ -201,7 +206,7 @@ func foreachArgImplNonstop(arg Arg, ctx *ArgCtx, f func(Arg, *ArgCtx)) {
 			if i == overlayField {
 				ctx.Offset = ctx0.Offset
 			}
-			foreachArgImpl(arg1, ctx, f)
+			foreachArgImplNonstop(arg1, ctx, f)
 			size := arg1.Size()
 			ctx.Offset += size
 			if totalSize < ctx.Offset {
@@ -215,13 +220,14 @@ func foreachArgImplNonstop(arg Arg, ctx *ArgCtx, f func(Arg, *ArgCtx)) {
 				totalSize, claimedSize, a, a.Type().Name()))
 		}
 	case *PointerArg:
+		log.Logf(0, "foreachArgImplNonstop: PointerArg: %v", a)
 		if a.Res != nil {
 			ctx.Base = a
 			ctx.Offset = 0
-			foreachArgImpl(a.Res, ctx, f)
+			foreachArgImplNonstop(a.Res, ctx, f)
 		}
 	case *UnionArg:
-		foreachArgImpl(a.Option, ctx, f)
+		foreachArgImplNonstop(a.Option, ctx, f)
 	}
 }
 

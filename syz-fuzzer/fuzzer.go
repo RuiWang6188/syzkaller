@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"path"
 	"runtime"
 	"runtime/debug"
 	"sort"
@@ -66,12 +67,15 @@ type Fuzzer struct {
 
 	checkResult *rpctype.CheckArgs
 	logMu       sync.Mutex
+
+	profiledCorpus []*prog.Prog
 }
 
 type FuzzerSnapshot struct {
-	corpus      []*prog.Prog
-	corpusPrios []int64
-	sumPrios    int64
+	corpus         []*prog.Prog
+	corpusPrios    []int64
+	sumPrios       int64
+	profiledCorpus []*prog.Prog
 }
 
 type Stat int
@@ -514,12 +518,32 @@ func (fuzzer *Fuzzer) checkDisabledCalls(p *prog.Prog) {
 	}
 }
 
+func (fuzzer *FuzzerSnapshot) chooseProfiledProgram(r *rand.Rand) *prog.Prog {
+	// return a random corpus from fuzzer.profiledCorpus
+	if len(fuzzer.profiledCorpus) == 0 {
+		return nil
+	}
+
+	p := fuzzer.profiledCorpus[r.Intn(len(fuzzer.profiledCorpus))]
+	log.Logf(0, "chooseProfiledProgram: %v", hash.String(p.Serialize()))
+	return p
+}
+
 func (fuzzer *FuzzerSnapshot) chooseProgram(r *rand.Rand) *prog.Prog {
 	randVal := r.Int63n(fuzzer.sumPrios + 1)
 	idx := sort.Search(len(fuzzer.corpusPrios), func(i int) bool {
 		return fuzzer.corpusPrios[i] >= randVal
 	})
 	return fuzzer.corpus[idx]
+}
+
+func checkProgProfiled(p *prog.Prog) bool {
+	profiledProgsDir := "/root/10"
+	progPath := path.Join(profiledProgsDir, hash.String(p.Serialize()))
+	if _, err := os.Stat(progPath); os.IsNotExist(err) {
+		return false
+	}
+	return true
 }
 
 func (fuzzer *Fuzzer) addInputToCorpus(p *prog.Prog, sign signal.Signal, sig hash.Sig) {
@@ -533,6 +557,15 @@ func (fuzzer *Fuzzer) addInputToCorpus(p *prog.Prog, sign signal.Signal, sig has
 		}
 		fuzzer.sumPrios += prio
 		fuzzer.corpusPrios = append(fuzzer.corpusPrios, fuzzer.sumPrios)
+
+		if checkProgProfiled(p) {
+			fuzzer.profiledCorpus = append(fuzzer.profiledCorpus, p)
+
+			log.Logf(0, "profiledCorpus size: %v", len(fuzzer.profiledCorpus))
+			for _, p := range fuzzer.profiledCorpus {
+				log.Logf(0, "profiledCorpus: %v", hash.String(p.Serialize()))
+			}
+		}
 	}
 	fuzzer.corpusMu.Unlock()
 
@@ -547,7 +580,7 @@ func (fuzzer *Fuzzer) addInputToCorpus(p *prog.Prog, sign signal.Signal, sig has
 func (fuzzer *Fuzzer) snapshot() FuzzerSnapshot {
 	fuzzer.corpusMu.RLock()
 	defer fuzzer.corpusMu.RUnlock()
-	return FuzzerSnapshot{fuzzer.corpus, fuzzer.corpusPrios, fuzzer.sumPrios}
+	return FuzzerSnapshot{fuzzer.corpus, fuzzer.corpusPrios, fuzzer.sumPrios, fuzzer.profiledCorpus}
 }
 
 func (fuzzer *Fuzzer) addMaxSignal(sign signal.Signal) {

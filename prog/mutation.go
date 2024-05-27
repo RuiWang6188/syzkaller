@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/syzkaller/pkg/hash"
 	"github.com/google/syzkaller/pkg/image"
+	"github.com/google/syzkaller/pkg/log"
 )
 
 type MLProgMutateInfo struct {
@@ -41,6 +42,7 @@ const maxBlobLen = uint64(100 << 10)
 // noMutate:    Set of IDs of syscalls which should not be mutated.
 // corpus:      The entire corpus, including original program p.
 func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, noMutate map[int]bool, corpus []*Prog) {
+	log.Logf(0, "[Mutate] mutating program: %v", hash.String(p.Serialize()))
 	r := newRand(p.Target, rs)
 	if ncalls < len(p.Calls) {
 		ncalls = len(p.Calls)
@@ -53,22 +55,33 @@ func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, noMutate map[
 		noMutate: noMutate,
 		corpus:   corpus,
 	}
-	for stop, ok := false, false; !stop; stop = ok && len(p.Calls) != 0 && r.oneOf(3) {
-		switch {
-		case r.oneOf(5):
-			// Not all calls have anything squashable,
-			// so this has lower priority in reality.
-			ok = ctx.squashAny()
-		case r.nOutOf(1, 100):
-			ok = ctx.splice()
-		case r.nOutOf(20, 31):
-			ok = ctx.insertCall()
-		case r.nOutOf(10, 11):
-			ok = ctx.mutateArg()
-		default:
-			ok = ctx.removeCall()
-		}
+
+	log.Logf(0, "start mutation loop for prog: %v", hash.String(p.Serialize()))
+
+	// for stop, ok := false, false; !stop; stop = ok && len(p.Calls) != 0 && r.oneOf(3) {
+	// 	switch {
+	// 	case r.oneOf(5):
+	// 		// Not all calls have anything squashable,
+	// 		// so this has lower priority in reality.
+	// 		ok = ctx.squashAny()
+	// 	case r.nOutOf(1, 100):
+	// 		ok = ctx.splice()
+	// 	case r.nOutOf(20, 31):
+	// 		ok = ctx.insertCall()
+	// 	case r.nOutOf(10, 11):
+	// 		ok = ctx.mutateArg()
+	// 	default:
+	// 		ok = ctx.removeCall()
+	// 	}
+	// }
+
+	for stop, ok := false, false; !stop; stop = ok && len(p.Calls) != 0 {
+		ok = ctx.mutateArg()
+		log.Logf(0, "[Mutate] mutation success: %v", ok)
+		log.Logf(0, "p.Calls len: %v", len(p.Calls))
 	}
+
+	log.Logf(0, "[Mutate] stop mutation loop for prog: %v", hash.String(p.Serialize()))
 	p.sanitizeFix()
 	p.debugValidate()
 	if got := len(p.Calls); got < 1 || got > ncalls {
@@ -200,7 +213,7 @@ func collectSubdirectories(dir string) ([]string, error) {
 	return subdirs, err
 }
 
-func readCSV(filePath string) (MLProgMutateInfo, error) {
+func readCSVMutated(filePath string) (MLProgMutateInfo, error) {
 	// Step 1: Open the CSV file
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -221,6 +234,7 @@ func readCSV(filePath string) (MLProgMutateInfo, error) {
 	if len(records) < 2 {
 		return MLProgMutateInfo{}, fmt.Errorf("number of records is less than 1")
 	}
+
 	offset, err := strconv.Atoi(records[1][0])
 	if err != nil {
 		return MLProgMutateInfo{}, fmt.Errorf("could not convert offset to int: %v", err)
@@ -241,8 +255,6 @@ func readCSV(filePath string) (MLProgMutateInfo, error) {
 		}
 
 		if record[3] == "true" {
-			// fmt.Println("Record found: ", record)
-
 			index, err := strconv.Atoi(record[0])
 			if err != nil {
 				return MLProgMutateInfo{}, fmt.Errorf("could not convert index to int: %v", err)
@@ -262,13 +274,32 @@ func readCSV(filePath string) (MLProgMutateInfo, error) {
 	return MLProgMutateInfo{}, fmt.Errorf("no record found")
 }
 
+func loadMLMutationDataset(csvFilePath string) (MLProgMutateInfo, error) {
+	// read the prog node label csv file and find the record with mutated label
+	modelOutput, err := readCSVMutated(csvFilePath)
+	if err != nil {
+		return MLProgMutateInfo{}, err
+	}
+	return modelOutput, nil
+}
+
 func getModelOutput(p *Prog, r *randGen) (MLProgMutateInfo, error) {
 	// 1. find the corresponding base prog dir in the corpus
-	modelOutputDir := "/data/ruitmp/dev-findCorrespondingArg"
+	modelOutputDir := "/root/10"
 	progHash := hash.String(p.Serialize())
+	log.Logf(0, "prog hash: %v", progHash)
 	progHashDir := path.Join(modelOutputDir, progHash)
+	log.Logf(0, "progHashDir: %v", progHashDir)
+
+	// check if progHashDir exists
+	if _, err := os.Stat(progHashDir); os.IsNotExist(err) {
+		log.Logf(0, "progHashDir doesn't exist: %v", progHashDir)
+		return MLProgMutateInfo{}, fmt.Errorf("prog hash directory does not exist: %s", progHashDir)
+	}
+
+	log.Logf(0, "progHashDir exists: %v", progHashDir)
+
 	// 2. choose a random mutation under the progHashDir
-	// TODO: double check this
 	subdirs, err := collectSubdirectories(progHashDir)
 	if err != nil {
 		panic(err)
@@ -278,17 +309,16 @@ func getModelOutput(p *Prog, r *randGen) (MLProgMutateInfo, error) {
 	}
 
 	selectedMutation := subdirs[r.Intn(len(subdirs))]
+
+	log.Logf(0, "selectedMutation: %v", selectedMutation)
+
+	// 3. load the csv file from the selected mutation
 	csvFilePath := path.Join(selectedMutation, "prog.node.label.csv")
 	if _, err := os.Stat(csvFilePath); os.IsNotExist(err) {
 		return MLProgMutateInfo{}, fmt.Errorf("no csv file found in %s", csvFilePath)
 	}
-	// 3. read the prog node label csv file and find the record with mutated label
-	modelOutput, err := readCSV(csvFilePath)
-	if err != nil {
-		return MLProgMutateInfo{}, err
-	}
 
-	return modelOutput, nil
+	return loadMLMutationDataset(csvFilePath)
 }
 
 func findArg(p *Prog, modelOutput MLProgMutateInfo) (Arg, ArgCtx) {
@@ -310,24 +340,55 @@ func findArg(p *Prog, modelOutput MLProgMutateInfo) (Arg, ArgCtx) {
 	fmt.Println("syscall name: ", c.Meta.Name)
 
 	ma := &mutationArgs{target: p.Target}
-	ForeachArgNonstop(c, ma.collectArg)
+	ForeachArgNonstop(c, ma.collectArgNonstop)
 	if len(ma.args) == 0 {
 		panic("no args found in mutation args")
 	}
 
-	argIdxOffset := argIndex - callIndex
+	argIdxOffset := argIndex - callIndex - 1
+
+	log.Logf(0, "argIdxOffset: %v", argIdxOffset)
+	log.Logf(0, "argIndex: %v", argIndex)
+	log.Logf(0, "callIndex: %v", callIndex)
+	log.Logf(0, "len(ma.args): %v", len(ma.args))
+
 	if argIdxOffset < 0 || argIdxOffset >= len(ma.args) {
 		panic("argIdxOffset is out of bound")
 	}
 
-	fmt.Println("arg type: ", ma.args[argIdxOffset].arg.Type().Name())
-	fmt.Println("arg name from model: ", modelOutput.ArgName)
+	// fmt.Println("arg type: ", ma.args[argIdxOffset].arg.type)
+	maArgType := "unknown"
+	switch ma.args[argIdxOffset].arg.(type) {
+	case *ConstArg:
+		maArgType = "constant"
+	case *PointerArg:
+		maArgType = "pointer"
+	case *DataArg:
+		maArgType = "data"
+	case *GroupArg:
+		maArgType = "group"
+	case *UnionArg:
+		maArgType = "union"
+	case *ResultArg:
+		maArgType = "resource"
+	default:
+		panic("arg type is not support")
+	}
+
+	log.Logf(0, "ma arg type: %v", maArgType)
+	log.Logf(0, "arg name from model: %v", modelOutput.ArgName)
+
+	if maArgType != modelOutput.ArgName {
+		panic("arg type from model does not match with the arg type in the program")
+	}
 
 	return ma.args[argIdxOffset].arg, ma.args[argIdxOffset].ctx
 }
 
 // Mutate an argument of a random call.
 func (ctx *mutator) mutateArg() bool {
+	log.Logf(0, "[mutateArg] mutating program: %v", hash.String(ctx.p.Serialize()))
+
 	p, r := ctx.p, ctx.r
 	if len(p.Calls) == 0 {
 		return false
@@ -346,7 +407,7 @@ func (ctx *mutator) mutateArg() bool {
 	}
 	c := p.Calls[idx]
 	if ctx.noMutate[c.Meta.ID] {
-		fmt.Println("no mutate syscall: ", c.Meta.Name)
+		log.Logf(0, "[mutateArg] no mutate syscall")
 		return false
 	}
 	updateSizes := true
@@ -358,7 +419,7 @@ func (ctx *mutator) mutateArg() bool {
 
 	calls, ok := p.Target.mutateArg(r, s, arg, argCtx, &updateSizes)
 	if !ok {
-		fmt.Println("mutateArg failed")
+		log.Logf(0, "Target.mutateArg failed")
 		return false
 	}
 	p.insertBefore(c, calls)
@@ -374,6 +435,7 @@ func (ctx *mutator) mutateArg() bool {
 	if updateSizes {
 		p.Target.assignSizesCall(c)
 	}
+	log.Logf(0, "[mutateArg] success")
 	return true
 }
 
@@ -694,6 +756,34 @@ const (
 	dontMutate  = float64(0)
 )
 
+func (ma *mutationArgs) collectArgNonstop(arg Arg, ctx *ArgCtx) {
+	ignoreSpecial := ma.ignoreSpecial
+	ma.ignoreSpecial = false
+
+	typ := arg.Type()
+	prio, stopRecursion := typ.getMutationPrio(ma.target, arg, ignoreSpecial)
+	ctx.Stop = stopRecursion
+
+	// if prio == dontMutate {
+	// 	log.Logf(0, "don't mutate arg: %v", arg.Type().Name())
+	// 	return
+	// }
+
+	// _, isArrayTyp := typ.(*ArrayType)
+	// _, isBufferTyp := typ.(*BufferType)
+	// if !isBufferTyp && !isArrayTyp && arg.Dir() == DirOut || !typ.Varlen() && typ.Size() == 0 {
+	// 	log.Logf(0, "return early")
+	// 	return
+	// }
+
+	if len(ma.args) == 0 {
+		ma.args = ma.argsBuffer[:0]
+	}
+	ma.prioSum += prio
+	ma.args = append(ma.args, mutationArg{arg, *ctx, ma.prioSum})
+}
+
+// TOOD (Rui): check the early termination
 func (ma *mutationArgs) collectArg(arg Arg, ctx *ArgCtx) {
 	ignoreSpecial := ma.ignoreSpecial
 	ma.ignoreSpecial = false
@@ -703,12 +793,14 @@ func (ma *mutationArgs) collectArg(arg Arg, ctx *ArgCtx) {
 	ctx.Stop = stopRecursion
 
 	if prio == dontMutate {
+		log.Logf(0, "don't mutate arg: %v", arg.Type().Name())
 		return
 	}
 
 	_, isArrayTyp := typ.(*ArrayType)
 	_, isBufferTyp := typ.(*BufferType)
 	if !isBufferTyp && !isArrayTyp && arg.Dir() == DirOut || !typ.Varlen() && typ.Size() == 0 {
+		log.Logf(0, "return early")
 		return
 	}
 
