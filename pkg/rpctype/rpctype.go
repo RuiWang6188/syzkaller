@@ -51,6 +51,10 @@ type ConnectRes struct {
 	CoverFilterBitmap []byte
 }
 
+type GetCandidateRes struct {
+	Progs []Candidate
+}
+
 type CheckArgs struct {
 	Name          string
 	Error         string

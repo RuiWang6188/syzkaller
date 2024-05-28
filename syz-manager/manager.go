@@ -9,7 +9,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"math/rand"
 	"net"
 	"os"
 	"os/exec"
@@ -603,7 +602,7 @@ func (mgr *Manager) preloadCorpus() {
 	}
 	mgr.corpusDB = corpusDB
 
-	if seedDir := filepath.Join(mgr.cfg.Syzkaller, "sys", mgr.cfg.TargetOS, "test"); osutil.IsExist(seedDir) {
+	if seedDir := "/not-exists"; osutil.IsExist(seedDir) {
 		seeds, err := os.ReadDir(seedDir)
 
 		if err != nil {
@@ -623,6 +622,8 @@ func (mgr *Manager) loadCorpus() {
 	// By default we don't re-minimize/re-smash programs from corpus,
 	// it takes lots of time on start and is unnecessary.
 	// However, on version bumps we can selectively re-minimize/re-smash.
+	log.Logf(0, "len(mgr.candidates): %v", len(mgr.candidates))
+
 	minimized, smashed := true, true
 	switch mgr.corpusDB.Version {
 	case 0:
@@ -658,6 +659,11 @@ func (mgr *Manager) loadCorpus() {
 		mgr.loadProg(seed, true, false)
 	}
 	log.Logf(0, "len(mgr.candidates): %v", len(mgr.candidates))
+
+	for idx, candidate := range mgr.candidates {
+		log.Logf(0, "candidate %v: %v", idx, hash.String(candidate.Prog))
+	}
+
 	log.Logf(0, "Corpus size: %v", corpusSize)
 	log.Logf(0, "%-24v: %v/%v", "seeds", len(mgr.candidates)-corpusSize, len(mgr.seeds))
 	mgr.seeds = nil
@@ -667,11 +673,11 @@ func (mgr *Manager) loadCorpus() {
 	// in such case it will also lost all cached candidates. Or, the input can be somewhat flaky
 	// and doesn't give the coverage on first try. So we give each input the second chance.
 	// Shuffling should alleviate deterministically losing the same inputs on fuzzer crashing.
-	mgr.candidates = append(mgr.candidates, mgr.candidates...)
-	shuffle := mgr.candidates[len(mgr.candidates)/2:]
-	rand.Shuffle(len(shuffle), func(i, j int) {
-		shuffle[i], shuffle[j] = shuffle[j], shuffle[i]
-	})
+	// mgr.candidates = append(mgr.candidates, mgr.candidates...)
+	// shuffle := mgr.candidates[len(mgr.candidates)/2:]
+	// rand.Shuffle(len(shuffle), func(i, j int) {
+	// 	shuffle[i], shuffle[j] = shuffle[j], shuffle[i]
+	// })
 	if mgr.phase != phaseInit {
 		panic(fmt.Sprintf("loadCorpus: bad phase %v", mgr.phase))
 	}
@@ -1329,6 +1335,8 @@ func (mgr *Manager) fuzzerConnect(modules []host.KernelModule) (
 	defer mgr.mu.Unlock()
 
 	mgr.minimizeCorpus()
+	log.Logf(0, "manager corpus size: %v", len(mgr.corpus))
+	log.Logf(0, "manager candidates size: %v", len(mgr.candidates))
 	corpus := make([]rpctype.Input, 0, len(mgr.corpus))
 	for _, inp := range mgr.corpus {
 		corpus = append(corpus, inp.RPCInput())
@@ -1410,6 +1418,7 @@ func (mgr *Manager) candidateBatch(size int) []rpctype.Candidate {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 	var res []rpctype.Candidate
+	log.Logf(0, "[candidateBatch] manager candidates size: %v", len(mgr.candidates))
 	for i := 0; i < size && len(mgr.candidates) > 0; i++ {
 		last := len(mgr.candidates) - 1
 		res = append(res, mgr.candidates[last])

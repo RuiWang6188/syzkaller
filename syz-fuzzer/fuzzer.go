@@ -288,12 +288,12 @@ func main() {
 	gateCallback := fuzzer.useBugFrames(r, *flagProcs)
 	fuzzer.gate = ipc.NewGate(2**flagProcs, gateCallback)
 
-	for needCandidates, more := true, true; more; needCandidates = false {
-		more = fuzzer.poll(needCandidates, nil)
-		// This loop lead to "no output" in qemu emulation, tell manager we are not dead.
-		log.Logf(0, "fetching corpus: %v, signal %v/%v (executing program)",
-			len(fuzzer.corpus), len(fuzzer.corpusSignal), len(fuzzer.maxSignal))
-	}
+	// for needCandidates, more := true, true; more; needCandidates = false {
+	// 	more = fuzzer.poll(needCandidates, nil)
+	// 	// This loop lead to "no output" in qemu emulation, tell manager we are not dead.
+	// 	log.Logf(0, "fetching corpus: %v, signal %v/%v (executing program)",
+	// 		len(fuzzer.corpus), len(fuzzer.corpusSignal), len(fuzzer.maxSignal))
+	// }
 	calls := make(map[*prog.Syscall]bool)
 	for _, id := range r.CheckResult.EnabledCalls[sandbox] {
 		calls[target.Syscalls[id]] = true
@@ -303,6 +303,14 @@ func main() {
 	if r.CoverFilterBitmap != nil {
 		fuzzer.execOpts.Flags |= ipc.FlagEnableCoverageFilter
 	}
+
+	fuzzer.corpus = fuzzer.getBaseProgs()
+
+	for idx, p := range fuzzer.corpus {
+		log.Logf(0, "prog %v: %v", idx, hash.String(p.Serialize()))
+	}
+
+	log.Logf(0, "fuzzer corpus size after getBaseProgs: %v", len(fuzzer.corpus))
 
 	log.Logf(0, "starting %v fuzzer processes", *flagProcs)
 	for pid := 0; pid < *flagProcs; pid++ {
@@ -381,41 +389,61 @@ func (fuzzer *Fuzzer) filterDataRaceFrames(frames []string) {
 
 func (fuzzer *Fuzzer) pollLoop() {
 	var execTotal uint64
-	var lastPoll time.Time
+	// var lastPoll time.Time
 	var lastPrint time.Time
-	ticker := time.NewTicker(3 * time.Second * fuzzer.timeouts.Scale).C
+	// ticker := time.NewTicker(3 * time.Second * fuzzer.timeouts.Scale).C
 	for {
-		poll := false
-		select {
-		case <-ticker:
-		case <-fuzzer.needPoll:
-			poll = true
-		}
+		// poll := false
+		// select {
+		// case <-ticker:
+		// case <-fuzzer.needPoll:
+		// 	poll = true
+		// }
 		if fuzzer.outputType != OutputStdout && time.Since(lastPrint) > 10*time.Second*fuzzer.timeouts.Scale {
 			// Keep-alive for manager.
 			log.Logf(0, "alive, executed %v", execTotal)
 			lastPrint = time.Now()
 		}
-		if poll || time.Since(lastPoll) > 10*time.Second*fuzzer.timeouts.Scale {
-			needCandidates := fuzzer.workQueue.wantCandidates()
-			if poll && !needCandidates {
-				continue
-			}
-			stats := make(map[string]uint64)
-			for _, proc := range fuzzer.procs {
-				stats["exec total"] += atomic.SwapUint64(&proc.env.StatExecs, 0)
-				stats["executor restarts"] += atomic.SwapUint64(&proc.env.StatRestarts, 0)
-			}
-			for stat := Stat(0); stat < StatCount; stat++ {
-				v := atomic.SwapUint64(&fuzzer.stats[stat], 0)
-				stats[statNames[stat]] = v
-				execTotal += v
-			}
-			if !fuzzer.poll(needCandidates, stats) {
-				lastPoll = time.Now()
-			}
-		}
+		// if poll || time.Since(lastPoll) > 10*time.Second*fuzzer.timeouts.Scale {
+		// 	needCandidates := fuzzer.workQueue.wantCandidates()
+		// 	if poll && !needCandidates {
+		// 		continue
+		// 	}
+		// 	stats := make(map[string]uint64)
+		// 	for _, proc := range fuzzer.procs {
+		// 		stats["exec total"] += atomic.SwapUint64(&proc.env.StatExecs, 0)
+		// 		stats["executor restarts"] += atomic.SwapUint64(&proc.env.StatRestarts, 0)
+		// 	}
+		// 	for stat := Stat(0); stat < StatCount; stat++ {
+		// 		v := atomic.SwapUint64(&fuzzer.stats[stat], 0)
+		// 		stats[statNames[stat]] = v
+		// 		execTotal += v
+		// 	}
+		// 	if !fuzzer.poll(needCandidates, stats) {
+		// 		lastPoll = time.Now()
+		// 	}
+		// }
 	}
+}
+
+func (fuzzer *Fuzzer) getBaseProgs() []*prog.Prog {
+	fuzzer.corpusMu.RLock()
+	defer fuzzer.corpusMu.RUnlock()
+	r := &rpctype.GetCandidateRes{}
+	if err := fuzzer.manager.Call("Manager.GetCandidate", 1000, r); err != nil {
+		log.SyzFatalf("Manager.GetCandidate call failed: %v", err)
+	}
+	candidates := r.Progs
+	log.Logf(0, "get %v base progs from manager.candidates", len(candidates))
+	progs := make([]*prog.Prog, 0, len(candidates))
+	for _, candidate := range candidates {
+		p := fuzzer.deserializeInput(candidate.Prog)
+		if p == nil {
+			continue
+		}
+		progs = append(progs, p)
+	}
+	return progs
 }
 
 func (fuzzer *Fuzzer) poll(needCandidates bool, stats map[string]uint64) bool {

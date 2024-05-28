@@ -60,75 +60,48 @@ func newProc(fuzzer *Fuzzer, pid int) (*Proc, error) {
 }
 
 func (proc *Proc) loop() {
-	generatePeriod := 100
-	if proc.fuzzer.config.Flags&ipc.FlagSignal == 0 {
-		// If we don't have real coverage signal, generate programs more frequently
-		// because fallback signal is weak.
-		generatePeriod = 2
-	}
-	for i := 0; ; i++ {
-		log.Logf(0, "fuzzer corpus size: %v", len(proc.fuzzer.corpus))
-		for _, p := range proc.fuzzer.corpus {
-			log.Logf(0, "corpus program: %v", hash.String(p.Serialize()))
-		}
-		log.Logf(0, "[before dequeue] workQueue size: %v", len(proc.fuzzer.workQueue.triageCandidate)+len(proc.fuzzer.workQueue.candidate)+len(proc.fuzzer.workQueue.triage)+len(proc.fuzzer.workQueue.smash))
-		item := proc.fuzzer.workQueue.dequeue()
-		if item != nil {
-			switch item := item.(type) {
-			case *WorkTriage:
-				log.Logf(0, "triage input: %v", hash.String(item.p.Serialize()))
-				proc.triageInput(item)
-			case *WorkCandidate:
-				log.Logf(0, "execute input: %v", hash.String(item.p.Serialize()))
-				proc.execute(proc.execOpts, item.p, item.flags, StatCandidate)
-			case *WorkSmash:
-				log.Logf(0, "smash input: %v", hash.String(item.p.Serialize()))
-				proc.smashInput(item)
-			default:
-				log.SyzFatalf("unknown work type: %#v", item)
-			}
-
-			log.Logf(0, "[after dequeue] workQueue size: %v", len(proc.fuzzer.workQueue.triageCandidate)+len(proc.fuzzer.workQueue.candidate)+len(proc.fuzzer.workQueue.triage)+len(proc.fuzzer.workQueue.smash))
-			// TODO (Rui): restore this
-			if len(proc.fuzzer.corpus) == 0 {
-				continue
-			}
-		}
-
-		ct := proc.fuzzer.choiceTable
-
-		fuzzerSnapshot := proc.fuzzer.snapshot()
-		log.Logf(0, "fuzzerSnapshot.corpus size: %v", len(fuzzerSnapshot.corpus))
-
-		for _, p := range fuzzerSnapshot.corpus {
-			log.Logf(0, "corpus program: %v", hash.String(p.Serialize()))
-		}
-
-		if len(fuzzerSnapshot.corpus) == 0 || i%generatePeriod == 0 {
-			log.Logf(0, "Generate a new prog")
-			// Generate a new prog.
-			p := proc.fuzzer.target.Generate(proc.rnd, prog.RecommendedCalls, ct)
-			log.Logf(1, "#%v: generated", proc.pid)
-			proc.executeAndCollide(proc.execOpts, p, ProgNormal, StatGenerate)
-		} else {
-			// Mutate an existing prog.
-			log.Logf(0, "Mutate an existing prog")
-			p := fuzzerSnapshot.chooseProfiledProgram(proc.rnd).Clone()
-			if p == nil {
-				log.Logf(0, "No profiled program found in chooseProfiledProgram()")
-				continue
-			}
-			// p := fuzzerSnapshot.chooseProgram(proc.rnd).Clone()
-			log.Logf(0, "[BM] chosen program: %v", hash.String(p.Serialize()))
-			p.Mutate(proc.rnd, prog.RecommendedCalls, ct, proc.fuzzer.noMutate, fuzzerSnapshot.corpus)
+	log.Logf(0, "[proc loop] fuzzer corpus size: %v", len(proc.fuzzer.corpus))
+	totalCorpus := len(proc.fuzzer.corpus)
+	for i := 0; i < totalCorpus; i++ {
+		p := proc.fuzzer.corpus[i]
+		proc.triageProg(p)
+		for j := 0; j < 100; j++ {
+			pe := p.Clone()
+			pe.Mutate(proc.rnd, prog.RecommendedCalls, proc.fuzzer.choiceTable, proc.fuzzer.noMutate, nil)
 			log.Logf(1, "#%v: mutated", proc.pid)
-			proc.executeAndCollide(proc.execOpts, p, ProgNormal, StatFuzz)
-
-			log.Logf(0, "[after mutate and executeAndCollide] fuzzer corpus size: %v", len(proc.fuzzer.corpus))
-			for _, p := range proc.fuzzer.corpus {
-				log.Logf(0, "corpus program: %v", hash.String(p.Serialize()))
-			}
+			proc.triageProg(pe)
+			proc.executeAndCollide(proc.execOpts, pe, ProgNormal, StatFuzz)
 		}
+	}
+}
+
+func (proc *Proc) triageProg(p *prog.Prog) {
+	info := proc.executeRaw(proc.execOpts, p, StatTriage)
+	if info == nil {
+		return
+	}
+	calls, extra := proc.fuzzer.checkNewSignal(p, info)
+	for _, callIndex := range calls {
+		info.Calls[callIndex].Signal = append([]uint32{}, info.Calls[callIndex].Signal...)
+		info.Calls[callIndex].Cover = nil
+		item := &WorkTriage{
+			p:     p.Clone(),
+			call:  callIndex,
+			info:  info.Calls[callIndex],
+			flags: ProgNormal,
+		}
+		proc.triageInput(item)
+	}
+	if extra {
+		info.Extra.Signal = append([]uint32{}, info.Extra.Signal...)
+		info.Extra.Cover = nil
+		item := &WorkTriage{
+			p:     p.Clone(),
+			call:  -1,
+			info:  info.Extra,
+			flags: ProgNormal,
+		}
+		proc.triageInput(item)
 	}
 }
 
@@ -178,26 +151,26 @@ func (proc *Proc) triageInput(item *WorkTriage) {
 		}
 		inputCover.Merge(thisCover)
 	}
-	if item.flags&ProgMinimized == 0 {
-		item.p, item.call = prog.Minimize(item.p, item.call, false,
-			func(p1 *prog.Prog, call1 int) bool {
-				for i := 0; i < minimizeAttempts; i++ {
-					info := proc.execute(proc.execOpts, p1, ProgNormal, StatMinimize)
-					if !reexecutionSuccess(info, &item.info, call1) {
-						// The call was not executed or failed.
-						continue
-					}
-					thisSignal, _ := getSignalAndCover(p1, info, call1)
-					if newSignal.Intersection(thisSignal).Len() == newSignal.Len() {
-						return true
-					}
-				}
-				return false
-			})
-	}
+	// if item.flags&ProgMinimized == 0 {
+	// 	item.p, item.call = prog.Minimize(item.p, item.call, false,
+	// 		func(p1 *prog.Prog, call1 int) bool {
+	// 			for i := 0; i < minimizeAttempts; i++ {
+	// 				info := proc.execute(proc.execOpts, p1, ProgNormal, StatMinimize)
+	// 				if !reexecutionSuccess(info, &item.info, call1) {
+	// 					// The call was not executed or failed.
+	// 					continue
+	// 				}
+	// 				thisSignal, _ := getSignalAndCover(p1, info, call1)
+	// 				if newSignal.Intersection(thisSignal).Len() == newSignal.Len() {
+	// 					return true
+	// 				}
+	// 			}
+	// 			return false
+	// 		})
+	// }
 
 	data := item.p.Serialize()
-	sig := hash.Hash(data)
+	// sig := hash.Hash(data)
 
 	log.Logf(2, "added new input for %v to corpus:\n%s", logCallName, data)
 	proc.fuzzer.sendInputToManager(rpctype.Input{
@@ -209,11 +182,11 @@ func (proc *Proc) triageInput(item *WorkTriage) {
 		RawCover: rawCover,
 	})
 
-	proc.fuzzer.addInputToCorpus(item.p, inputSignal, sig)
+	// proc.fuzzer.addInputToCorpus(item.p, inputSignal, sig)
 
-	if item.flags&ProgSmashed == 0 {
-		proc.fuzzer.workQueue.enqueue(&WorkSmash{item.p, item.call})
-	}
+	// if item.flags&ProgSmashed == 0 {
+	// 	proc.fuzzer.workQueue.enqueue(&WorkSmash{item.p, item.call})
+	// }
 }
 
 func reexecutionSuccess(info *ipc.ProgInfo, oldInfo *ipc.CallInfo, call int) bool {

@@ -75,8 +75,14 @@ func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, noMutate map[
 	// 	}
 	// }
 
+	accuracy := 1.0
+
 	for stop, ok := false, false; !stop; stop = ok && len(p.Calls) != 0 {
-		ok = ctx.mutateArg()
+		if r.Float64() > accuracy {
+			ok = ctx.mutateArgSyz()
+		} else {
+			ok = ctx.mutateArg()
+		}
 		log.Logf(0, "[Mutate] mutation success: %v", ok)
 		log.Logf(0, "p.Calls len: %v", len(p.Calls))
 	}
@@ -383,6 +389,52 @@ func findArg(p *Prog, modelOutput MLProgMutateInfo) (Arg, ArgCtx) {
 	}
 
 	return ma.args[argIdxOffset].arg, ma.args[argIdxOffset].ctx
+}
+
+func (ctx *mutator) mutateArgSyz() bool {
+	p, r := ctx.p, ctx.r
+	if len(p.Calls) == 0 {
+		return false
+	}
+
+	idx := chooseCall(p, r)
+	if idx < 0 {
+		return false
+	}
+	c := p.Calls[idx]
+	if ctx.noMutate[c.Meta.ID] {
+		return false
+	}
+	updateSizes := true
+	for stop, ok := false, false; !stop; stop = ok && r.oneOf(3) {
+		ok = true
+		ma := &mutationArgs{target: p.Target}
+		ForeachArg(c, ma.collectArg)
+		if len(ma.args) == 0 {
+			return false
+		}
+		s := analyze(ctx.ct, ctx.corpus, p, c)
+		arg, argCtx := ma.chooseArg(r.Rand)
+		calls, ok1 := p.Target.mutateArg(r, s, arg, argCtx, &updateSizes)
+		if !ok1 {
+			ok = false
+			continue
+		}
+		p.insertBefore(c, calls)
+		idx += len(calls)
+		for len(p.Calls) > ctx.ncalls {
+			idx--
+			p.RemoveCall(idx)
+		}
+		if idx < 0 || idx >= len(p.Calls) || p.Calls[idx] != c {
+			panic(fmt.Sprintf("wrong call index: idx=%v calls=%v p.Calls=%v ncalls=%v",
+				idx, len(calls), len(p.Calls), ctx.ncalls))
+		}
+		if updateSizes {
+			p.Target.assignSizesCall(c)
+		}
+	}
+	return true
 }
 
 // Mutate an argument of a random call.

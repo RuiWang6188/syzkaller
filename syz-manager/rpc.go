@@ -88,6 +88,19 @@ func startRPCServer(mgr *Manager) (*RPCServer, error) {
 	return serv, nil
 }
 
+func (serv *RPCServer) GetCandidate(a int, r *rpctype.GetCandidateRes) error {
+	candidates := serv.mgr.candidateBatch(a)
+	r.Progs = make([]rpctype.Candidate, len(candidates))
+	for i, candidate := range candidates {
+		r.Progs[i] = rpctype.Candidate{
+			Prog:      candidate.Prog,
+			Minimized: candidate.Minimized,
+			Smashed:   candidate.Smashed,
+		}
+	}
+	return nil
+}
+
 func (serv *RPCServer) Connect(a *rpctype.ConnectArgs, r *rpctype.ConnectRes) error {
 	log.Logf(1, "fuzzer %v connected", a.Name)
 	serv.stats.vmRestarts.inc()
