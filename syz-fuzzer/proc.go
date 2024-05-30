@@ -70,7 +70,7 @@ func (proc *Proc) loop() {
 			pe.Mutate(proc.rnd, prog.RecommendedCalls, proc.fuzzer.choiceTable, proc.fuzzer.noMutate, nil)
 			log.Logf(1, "#%v: mutated", proc.pid)
 			proc.triageProg(pe)
-			proc.executeAndCollide(proc.execOpts, pe, ProgNormal, StatFuzz)
+			// proc.executeAndCollide(proc.execOpts, pe, ProgNormal, StatFuzz)
 		}
 	}
 }

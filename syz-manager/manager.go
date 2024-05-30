@@ -287,7 +287,6 @@ func (mgr *Manager) initBench() {
 	}
 	go func() {
 		for {
-			time.Sleep(time.Minute)
 			vals := mgr.stats.all()
 			mgr.mu.Lock()
 			if mgr.firstConnect.IsZero() {
@@ -308,6 +307,7 @@ func (mgr *Manager) initBench() {
 			if _, err := f.Write(append(data, '\n')); err != nil {
 				log.Fatalf("failed to write bench data")
 			}
+			time.Sleep(time.Second)
 		}
 	}()
 }
@@ -593,7 +593,9 @@ func (pool *ResourcePool) TakeOne() *int {
 
 func (mgr *Manager) preloadCorpus() {
 	log.Logf(0, "loading corpus...")
-	corpusDB, err := db.Open(filepath.Join(mgr.cfg.Workdir, "corpus.db"), true)
+	corpus_name := "corpus-10-1.0.db"
+	log.Logf(0, "loading corpus from %v", filepath.Join(mgr.cfg.Workdir, corpus_name))
+	corpusDB, err := db.Open(filepath.Join(mgr.cfg.Workdir, corpus_name), true)
 	if err != nil {
 		if corpusDB == nil {
 			log.Fatalf("failed to open corpus database: %v", err)
@@ -645,12 +647,16 @@ func (mgr *Manager) loadCorpus() {
 	case currentDBVersion:
 	}
 	broken := 0
+	log.Logf(0, "loading %v programs from corpus...", len(mgr.corpusDB.Records))
 	for key, rec := range mgr.corpusDB.Records {
 		if !mgr.loadProg(rec.Val, minimized, smashed) {
 			mgr.corpusDB.Delete(key)
 			broken++
 		}
 	}
+	log.Logf(0, "loaded %v programs from corpus", len(mgr.candidates))
+	log.Logf(0, "current corpusDB size: %v", len(mgr.corpusDB.Records))
+
 	mgr.fresh = len(mgr.corpusDB.Records) == 0
 	corpusSize := len(mgr.candidates)
 	log.Logf(0, "%-24v: %v (deleted %v broken)", "corpus", corpusSize, broken)
@@ -660,6 +666,7 @@ func (mgr *Manager) loadCorpus() {
 	}
 	log.Logf(0, "len(mgr.candidates): %v", len(mgr.candidates))
 
+	// create a list and save the candidate into the list
 	for idx, candidate := range mgr.candidates {
 		log.Logf(0, "candidate %v: %v", idx, hash.String(candidate.Prog))
 	}

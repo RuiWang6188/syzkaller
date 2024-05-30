@@ -306,8 +306,8 @@ func main() {
 
 	fuzzer.corpus = fuzzer.getBaseProgs()
 
-	for idx, p := range fuzzer.corpus {
-		log.Logf(0, "prog %v: %v", idx, hash.String(p.Serialize()))
+	for _, p := range fuzzer.corpus {
+		log.Logf(0, "%v", hash.String(p.Serialize()))
 	}
 
 	log.Logf(0, "fuzzer corpus size after getBaseProgs: %v", len(fuzzer.corpus))

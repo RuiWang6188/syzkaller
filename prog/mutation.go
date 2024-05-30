@@ -76,7 +76,7 @@ func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, noMutate map[
 	// }
 
 	accuracy := 1.0
-
+	log.Logf(0, "accuracy: %v", accuracy)
 	for stop, ok := false, false; !stop; stop = ok && len(p.Calls) != 0 {
 		if r.Float64() > accuracy {
 			ok = ctx.mutateArgSyz()
