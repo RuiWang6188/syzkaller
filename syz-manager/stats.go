@@ -14,6 +14,7 @@ import (
 type Stat uint64
 
 type Stats struct {
+	fuzzingIterations   Stat
 	crashes             Stat
 	crashTypes          Stat
 	crashSuppressed     Stat
@@ -62,17 +63,18 @@ func (mgr *Manager) initStats() {
 
 func (stats *Stats) all() map[string]uint64 {
 	m := map[string]uint64{
-		"crashes":           stats.crashes.get(),
-		"crash types":       stats.crashTypes.get(),
-		"suppressed":        stats.crashSuppressed.get(),
-		"vm restarts":       stats.vmRestarts.get(),
-		"new inputs":        stats.newInputs.get(),
-		"rotated inputs":    stats.rotatedInputs.get(),
-		"exec total":        stats.execTotal.get(),
-		"coverage":          stats.corpusCover.get(),
-		"filtered coverage": stats.corpusCoverFiltered.get(),
-		"signal":            stats.corpusSignal.get(),
-		"max signal":        stats.maxSignal.get(),
+		"fuzzing iterations": stats.fuzzingIterations.get(), // "fuzzing iterations": "fuzzing iterations",
+		"crashes":            stats.crashes.get(),
+		"crash types":        stats.crashTypes.get(),
+		"suppressed":         stats.crashSuppressed.get(),
+		"vm restarts":        stats.vmRestarts.get(),
+		"new inputs":         stats.newInputs.get(),
+		"rotated inputs":     stats.rotatedInputs.get(),
+		"exec total":         stats.execTotal.get(),
+		"coverage":           stats.corpusCover.get(),
+		"filtered coverage":  stats.corpusCoverFiltered.get(),
+		"signal":             stats.corpusSignal.get(),
+		"max signal":         stats.maxSignal.get(),
 	}
 	if stats.haveHub {
 		m["hub: send prog add"] = stats.hubSendProgAdd.get()

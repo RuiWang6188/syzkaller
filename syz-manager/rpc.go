@@ -268,6 +268,15 @@ func (serv *RPCServer) Check(a *rpctype.CheckArgs, r *int) error {
 	return nil
 }
 
+func (serv *RPCServer) UpdateFuzzingIter(a *int, r *int) error {
+	serv.mu.Lock()
+	defer serv.mu.Unlock()
+
+	serv.stats.fuzzingIterations.inc()
+	log.Logf(0, "UpdateFuzzingIter: %v", serv.stats.fuzzingIterations.get())
+	return nil
+}
+
 func (serv *RPCServer) NewInput(a *rpctype.NewInputArgs, r *int) error {
 	bad, disabled := checkProgram(serv.cfg.Target, serv.targetEnabledSyscalls, a.Input.Prog)
 	if bad != nil || disabled {
@@ -292,9 +301,11 @@ func (serv *RPCServer) NewInput(a *rpctype.NewInputArgs, r *int) error {
 		rotated = !f.rotatedSignal.Diff(inputSignal).Empty()
 	}
 	if !genuine && !rotated {
+		log.Logf(0, "[early return] !genuine && !rotated")
 		return nil
 	}
 	if !serv.mgr.newInput(a.Input, inputSignal) {
+		log.Logf(0, "[early return] manager NewInput failed")
 		return nil
 	}
 
@@ -307,6 +318,7 @@ func (serv *RPCServer) NewInput(a *rpctype.NewInputArgs, r *int) error {
 		// Note: ReportGenerator is already initialized if coverFilter is enabled.
 		rg, err := getReportGenerator(serv.cfg, serv.modules)
 		if err != nil {
+			log.Logf(0, "[early return] get report generator failed: %v", err)
 			return err
 		}
 		filtered := 0
@@ -317,6 +329,7 @@ func (serv *RPCServer) NewInput(a *rpctype.NewInputArgs, r *int) error {
 		}
 		serv.stats.corpusCoverFiltered.add(filtered)
 	}
+	log.Logf(0, "increment stats.newInputs, current value: %v", serv.stats.newInputs.get())
 	serv.stats.newInputs.inc()
 	if rotated {
 		serv.stats.rotatedInputs.inc()

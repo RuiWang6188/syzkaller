@@ -593,7 +593,7 @@ func (pool *ResourcePool) TakeOne() *int {
 
 func (mgr *Manager) preloadCorpus() {
 	log.Logf(0, "loading corpus...")
-	corpus_name := "corpus-10-1.0.db"
+	corpus_name := "corpus-1000-1.0.db"
 	log.Logf(0, "loading corpus from %v", filepath.Join(mgr.cfg.Workdir, corpus_name))
 	corpusDB, err := db.Open(filepath.Join(mgr.cfg.Workdir, corpus_name), true)
 	if err != nil {
@@ -1392,6 +1392,7 @@ func (mgr *Manager) newInput(inp rpctype.Input, sign signal.Signal) bool {
 	}
 	sig := hash.String(inp.Prog)
 	if old, ok := mgr.corpus[sig]; ok {
+		log.Logf(0, "input already present in corpus: %v", sig)
 		// The input is already present, but possibly with diffent signal/coverage/call.
 		sign.Merge(old.Signal.Deserialize())
 		old.Signal = sign.Serialize()
@@ -1406,6 +1407,7 @@ func (mgr *Manager) newInput(inp rpctype.Input, sign signal.Signal) bool {
 		}
 		mgr.corpus[sig] = old
 	} else {
+		log.Logf(0, "new input: %v", sig)
 		mgr.corpus[sig] = CorpusItem{
 			Call:    inp.Call,
 			Prog:    inp.Prog,

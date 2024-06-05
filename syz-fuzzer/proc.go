@@ -35,11 +35,13 @@ type Proc struct {
 }
 
 func newProc(fuzzer *Fuzzer, pid int) (*Proc, error) {
+	log.Logf(0, "newProc")
 	env, err := ipc.MakeEnv(fuzzer.config, pid)
 	if err != nil {
 		return nil, err
 	}
-	rnd := rand.New(rand.NewSource(time.Now().UnixNano() + int64(pid)*1e12))
+	seed := int64(20240604)
+	rnd := rand.New(rand.NewSource(seed))
 	execOptsCollide := *fuzzer.execOpts
 	execOptsCollide.Flags &= ^ipc.FlagCollectSignal
 	execOptsCover := *fuzzer.execOpts
@@ -64,10 +66,17 @@ func (proc *Proc) loop() {
 	totalCorpus := len(proc.fuzzer.corpus)
 	for i := 0; i < totalCorpus; i++ {
 		p := proc.fuzzer.corpus[i]
-		proc.triageProg(p)
+		proc.triageProg(p.Clone())
+		a := 0
+		if err := proc.fuzzer.manager.Call("Manager.UpdateFuzzingIter", &a, nil); err != nil {
+			log.SyzFatalf("Manager.UpdateFuzzingIter call failed: %v", err)
+		}
 		for j := 0; j < 100; j++ {
 			pe := p.Clone()
 			pe.Mutate(proc.rnd, prog.RecommendedCalls, proc.fuzzer.choiceTable, proc.fuzzer.noMutate, nil)
+			if err := proc.fuzzer.manager.Call("Manager.UpdateFuzzingIter", &a, nil); err != nil {
+				log.SyzFatalf("Manager.UpdateFuzzingIter call failed: %v", err)
+			}
 			log.Logf(1, "#%v: mutated", proc.pid)
 			proc.triageProg(pe)
 			// proc.executeAndCollide(proc.execOpts, pe, ProgNormal, StatFuzz)
@@ -76,12 +85,15 @@ func (proc *Proc) loop() {
 }
 
 func (proc *Proc) triageProg(p *prog.Prog) {
+	log.Logf(0, "triageProg: %v", hash.String(p.Serialize()))
 	info := proc.executeRaw(proc.execOpts, p, StatTriage)
 	if info == nil {
 		return
 	}
 	calls, extra := proc.fuzzer.checkNewSignal(p, info)
+	log.Logf(0, "triageProg: calls=%v, extra=%v", calls, extra)
 	for _, callIndex := range calls {
+		log.Logf(0, "triageProg: callIndex=%v", callIndex)
 		info.Calls[callIndex].Signal = append([]uint32{}, info.Calls[callIndex].Signal...)
 		info.Calls[callIndex].Cover = nil
 		item := &WorkTriage{
@@ -93,6 +105,7 @@ func (proc *Proc) triageProg(p *prog.Prog) {
 		proc.triageInput(item)
 	}
 	if extra {
+		log.Logf(0, "triageProg: extra")
 		info.Extra.Signal = append([]uint32{}, info.Extra.Signal...)
 		info.Extra.Cover = nil
 		item := &WorkTriage{
@@ -112,6 +125,7 @@ func (proc *Proc) triageInput(item *WorkTriage) {
 	inputSignal := signal.FromRaw(item.info.Signal, prio)
 	newSignal := proc.fuzzer.corpusSignalDiff(inputSignal)
 	if newSignal.Empty() {
+		log.Logf(0, "[early return] newSignal is empty")
 		return
 	}
 	callName := ".extra"
@@ -135,6 +149,7 @@ func (proc *Proc) triageInput(item *WorkTriage) {
 			// The call was not executed or failed.
 			notexecuted++
 			if notexecuted > signalRuns/2+1 {
+				log.Logf(0, "[early return] not executed too many times: %v", notexecuted)
 				return // if happens too often, give up
 			}
 			continue
