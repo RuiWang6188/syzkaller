@@ -307,7 +307,7 @@ func (mgr *Manager) initBench() {
 			if _, err := f.Write(append(data, '\n')); err != nil {
 				log.Fatalf("failed to write bench data")
 			}
-			time.Sleep(time.Second)
+			time.Sleep(time.Millisecond * 100)
 		}
 	}()
 }

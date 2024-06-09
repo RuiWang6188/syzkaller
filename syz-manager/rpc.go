@@ -288,10 +288,12 @@ func (serv *RPCServer) NewInput(a *rpctype.NewInputArgs, r *int) error {
 
 	f := serv.fuzzers[a.Name]
 	if f != nil {
+		log.Logf(0, "[before canonicalize] cover=%v", a.Cover)
 		a.Cover, a.Signal = f.instModules.Canonicalize(a.Cover, a.Signal)
+		log.Logf(0, "[after canonicalize] cover=%v", a.Cover)
 	}
 	inputSignal := a.Signal.Deserialize()
-	log.Logf(4, "new input from %v for syscall %v (signal=%v, cover=%v)",
+	log.Logf(0, "new input from %v for syscall %v (signal=%v, cover=%v)",
 		a.Name, a.Call, inputSignal.Len(), len(a.Cover))
 	// Note: f may be nil if we called shutdownInstance,
 	// but this request is already in-flight.
@@ -313,7 +315,9 @@ func (serv *RPCServer) NewInput(a *rpctype.NewInputArgs, r *int) error {
 		f.rotatedSignal.Merge(inputSignal)
 	}
 	diff := serv.corpusCover.MergeDiff(a.Cover)
+	log.Logf(0, "serv.corpusCover: %v", serv.corpusCover)
 	serv.stats.corpusCover.set(len(serv.corpusCover))
+	log.Logf(0, "serv.stats.corpusCover: %v", serv.stats.corpusCover.get())
 	if len(diff) != 0 && serv.coverFilter != nil {
 		// Note: ReportGenerator is already initialized if coverFilter is enabled.
 		rg, err := getReportGenerator(serv.cfg, serv.modules)

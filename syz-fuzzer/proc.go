@@ -66,12 +66,13 @@ func (proc *Proc) loop() {
 	totalCorpus := len(proc.fuzzer.corpus)
 	for i := 0; i < totalCorpus; i++ {
 		p := proc.fuzzer.corpus[i]
-		proc.triageProg(p.Clone())
 		a := 0
 		if err := proc.fuzzer.manager.Call("Manager.UpdateFuzzingIter", &a, nil); err != nil {
 			log.SyzFatalf("Manager.UpdateFuzzingIter call failed: %v", err)
 		}
+		proc.triageProg(p.Clone())
 		for j := 0; j < 100; j++ {
+			log.Logf(0, "prog %v, mutation index: %v", i, j)
 			pe := p.Clone()
 			pe.Mutate(proc.rnd, prog.RecommendedCalls, proc.fuzzer.choiceTable, proc.fuzzer.noMutate, nil)
 			if err := proc.fuzzer.manager.Call("Manager.UpdateFuzzingIter", &a, nil); err != nil {
@@ -91,6 +92,13 @@ func (proc *Proc) triageProg(p *prog.Prog) {
 		return
 	}
 	calls, extra := proc.fuzzer.checkNewSignal(p, info)
+
+	log.Logf(0, "triageProg executeRaw info:")
+	for i, callInfo := range info.Calls {
+		log.Logf(0, "call %v: signal: %v", i, callInfo.Signal)
+		log.Logf(0, "")
+	}
+
 	log.Logf(0, "triageProg: calls=%v, extra=%v", calls, extra)
 	for _, callIndex := range calls {
 		log.Logf(0, "triageProg: callIndex=%v", callIndex)
@@ -123,7 +131,9 @@ func (proc *Proc) triageInput(item *WorkTriage) {
 
 	prio := signalPrio(item.p, &item.info, item.call)
 	inputSignal := signal.FromRaw(item.info.Signal, prio)
+	log.Logf(0, "inputSignal: %v", inputSignal)
 	newSignal := proc.fuzzer.corpusSignalDiff(inputSignal)
+	log.Logf(0, "newSignal: %v", newSignal)
 	if newSignal.Empty() {
 		log.Logf(0, "[early return] newSignal is empty")
 		return
@@ -145,7 +155,9 @@ func (proc *Proc) triageInput(item *WorkTriage) {
 	rawCover := []uint32{}
 	for i := 0; i < signalRuns; i++ {
 		info := proc.executeRaw(proc.execOptsCover, item.p, StatTriage)
+
 		if !reexecutionSuccess(info, &item.info, item.call) {
+			log.Logf(0, "[early return] reexecution failed")
 			// The call was not executed or failed.
 			notexecuted++
 			if notexecuted > signalRuns/2+1 {
@@ -154,18 +166,33 @@ func (proc *Proc) triageInput(item *WorkTriage) {
 			}
 			continue
 		}
+
+		for i, callInfo := range info.Calls {
+			log.Logf(0, "call %v: cover %v", i, callInfo.Cover)
+			log.Logf(0, "call %v: signal %v", i, callInfo.Cover)
+		}
+
 		thisSignal, thisCover := getSignalAndCover(item.p, info, item.call)
+		log.Logf(0, "[call %v] thisSignal: %v", item.call, thisSignal)
+		log.Logf(0, "[call %v] thisCover: %v", item.call, thisCover)
 		if len(rawCover) == 0 && proc.fuzzer.fetchRawCover {
 			rawCover = append([]uint32{}, thisCover...)
 		}
 		newSignal = newSignal.Intersection(thisSignal)
+		log.Logf(0, "newSignal after Intersection: %v", newSignal)
 		// Without !minimized check manager starts losing some considerable amount
 		// of coverage after each restart. Mechanics of this are not completely clear.
 		if newSignal.Empty() && item.flags&ProgMinimized == 0 {
+			log.Logf(0, "newSignal.Empty(): %v", newSignal.Empty())
+			log.Logf(0, "item.flags: %v", item.flags)
+			log.Logf(0, "ProgMinimized: %v", ProgMinimized)
+			log.Logf(0, "[early return] newSignal is empty and item.flags&ProgMinimized == 0")
 			return
 		}
 		inputCover.Merge(thisCover)
 	}
+	log.Logf(0, "inputCover: %v", inputCover)
+	log.Logf(0, "currentCoverage: %v", len(inputCover.Serialize()))
 	// if item.flags&ProgMinimized == 0 {
 	// 	item.p, item.call = prog.Minimize(item.p, item.call, false,
 	// 		func(p1 *prog.Prog, call1 int) bool {
@@ -343,6 +370,9 @@ func (proc *Proc) randomCollide(origP *prog.Prog) *prog.Prog {
 }
 
 func (proc *Proc) executeRaw(opts *ipc.ExecOpts, p *prog.Prog, stat Stat) *ipc.ProgInfo {
+	log.Logf(0, "[executeRaw] opts: %v", opts)
+	log.Logf(0, "prog: %v", hash.String(p.Serialize()))
+
 	proc.fuzzer.checkDisabledCalls(p)
 
 	// Limit concurrency window and do leak checking once in a while.

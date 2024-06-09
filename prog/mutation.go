@@ -354,10 +354,14 @@ func findArg(p *Prog, modelOutput MLProgMutateInfo) (Arg, ArgCtx) {
 
 	argIdxOffset := argIndex - callIndex - 1
 
-	log.Logf(0, "argIdxOffset: %v", argIdxOffset)
-	log.Logf(0, "argIndex: %v", argIndex)
-	log.Logf(0, "callIndex: %v", callIndex)
-	log.Logf(0, "len(ma.args): %v", len(ma.args))
+	log.Logf(0, "mutate call index: %v", progCallIndex)
+	log.Logf(0, "mutate call: %v", c.Meta.Name)
+
+	log.Logf(0, "mutate arg index : %v", argIdxOffset)
+	log.Logf(0, "chosen arg: %v", ma.args[argIdxOffset].arg.Type().Name())
+	// log.Logf(0, "argIndex: %v", argIndex)
+	// log.Logf(0, "callIndex: %v", callIndex)
+	// log.Logf(0, "len(ma.args): %v", len(ma.args))
 
 	if argIdxOffset < 0 || argIdxOffset >= len(ma.args) {
 		panic("argIdxOffset is out of bound")
@@ -406,6 +410,8 @@ func (ctx *mutator) mutateArgSyz() bool {
 	if ctx.noMutate[c.Meta.ID] {
 		return false
 	}
+	log.Logf(0, "mutate call index: %v", idx)
+	log.Logf(0, "mutate call: %v", c.Meta.Name)
 	updateSizes := true
 	for stop, ok := false, false; !stop; stop = ok && r.oneOf(3) {
 		ok = true
@@ -416,7 +422,7 @@ func (ctx *mutator) mutateArgSyz() bool {
 		}
 		s := analyze(ctx.ct, ctx.corpus, p, c)
 		arg, argCtx := ma.chooseArg(r.Rand)
-		calls, ok1 := p.Target.mutateArg(r, s, arg, argCtx, &updateSizes)
+		calls, ok1 := p.Target.mutateArg(s, arg, argCtx, &updateSizes)
 		if !ok1 {
 			ok = false
 			continue
@@ -469,7 +475,7 @@ func (ctx *mutator) mutateArg() bool {
 	arg, argCtx := findArg(p, modelOutput)
 	// arg, argCtx := ma.chooseArg(r.Rand)
 
-	calls, ok := p.Target.mutateArg(r, s, arg, argCtx, &updateSizes)
+	calls, ok := p.Target.mutateArg(s, arg, argCtx, &updateSizes)
 	if !ok {
 		log.Logf(0, "Target.mutateArg failed")
 		return false
@@ -510,7 +516,10 @@ func chooseCall(p *Prog, r *randGen) int {
 	return sort.SearchFloat64s(callPriorities, prioSum*r.Float64())
 }
 
-func (target *Target) mutateArg(r *randGen, s *state, arg Arg, ctx ArgCtx, updateSizes *bool) ([]*Call, bool) {
+func (target *Target) mutateArg(s *state, arg Arg, ctx ArgCtx, updateSizes *bool) ([]*Call, bool) {
+	seed := int64(12345)
+	src := rand.NewSource(seed)
+	r := newRand(target, src)
 	var baseSize uint64
 	if ctx.Base != nil {
 		baseSize = ctx.Base.Res.Size()
@@ -866,6 +875,9 @@ func (ma *mutationArgs) chooseArg(r *rand.Rand) (Arg, ArgCtx) {
 	goal := ma.prioSum * r.Float64()
 	chosenIdx := sort.Search(len(ma.args), func(i int) bool { return ma.args[i].priority >= goal })
 	arg := ma.args[chosenIdx]
+
+	log.Logf(0, "goal: %v, chosenIdx: %v, prioSum: %v", goal, chosenIdx, ma.prioSum)
+	log.Logf(0, "chosen arg: %v", arg.arg.Type().Name())
 	return arg.arg, arg.ctx
 }
 
