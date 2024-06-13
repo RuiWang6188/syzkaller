@@ -441,6 +441,13 @@ func (fuzzer *Fuzzer) getBaseProgs() []*prog.Prog {
 		if p == nil {
 			continue
 		}
+		progHash := hash.String(p.Serialize())
+		progPath := path.Join("/root/1", progHash)
+		if _, err := os.Stat(progPath); os.IsNotExist(err) {
+			log.Logf(0, "prog %v not exists in %v", progHash, progPath)
+			continue
+		}
+
 		progs = append(progs, p)
 	}
 	return progs
@@ -480,6 +487,16 @@ func (fuzzer *Fuzzer) sendInputToManager(inp rpctype.Input) {
 	}
 	if err := fuzzer.manager.Call("Manager.NewInput", a, nil); err != nil {
 		log.SyzFatalf("Manager.NewInput call failed: %v", err)
+	}
+}
+
+func (fuzzer *Fuzzer) sendCoverageToManager(cov []uint32) {
+	a := &rpctype.ReceiveCoverArgs{
+		Name:  fuzzer.name,
+		Cover: cov,
+	}
+	if err := fuzzer.manager.Call("Manager.ReceiveCover", a, nil); err != nil {
+		log.SyzFatalf("Manager.Cover call failed: %v", err)
 	}
 }
 

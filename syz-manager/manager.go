@@ -593,7 +593,7 @@ func (pool *ResourcePool) TakeOne() *int {
 
 func (mgr *Manager) preloadCorpus() {
 	log.Logf(0, "loading corpus...")
-	corpus_name := "corpus-1000-1.0.db"
+	corpus_name := "corpus-1.db"
 	log.Logf(0, "loading corpus from %v", filepath.Join(mgr.cfg.Workdir, corpus_name))
 	corpusDB, err := db.Open(filepath.Join(mgr.cfg.Workdir, corpus_name), true)
 	if err != nil {
@@ -845,6 +845,8 @@ func (mgr *Manager) runInstanceInner(index int, instanceName string) (*report.Re
 		},
 	}
 	cmd := instance.FuzzerCmd(args)
+	mgr.cfg.Timeouts.VMRunningTime = 24 * time.Hour
+	log.Logf(0, "mgr.cfg.Timeouts.VMRunningTime: %v", mgr.cfg.Timeouts.VMRunningTime)
 	outc, errc, err := inst.Run(mgr.cfg.Timeouts.VMRunningTime, mgr.vmStop, cmd)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to run fuzzer: %w", err)

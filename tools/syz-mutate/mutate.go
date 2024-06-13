@@ -94,7 +94,7 @@ func main() {
 			})
 			return
 		} else {
-			p.Mutate(rs, *flagLen, ct, nil, corpus)
+			p.Mutate(rs, *flagLen, ct, nil, false)
 		}
 	}
 	fmt.Printf("%s\n", p.Serialize())

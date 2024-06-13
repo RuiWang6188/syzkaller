@@ -74,6 +74,11 @@ type NewInputArgs struct {
 	Input
 }
 
+type ReceiveCoverArgs struct {
+	Name  string
+	Cover []uint32
+}
+
 type PollArgs struct {
 	Name           string
 	NeedCandidates bool

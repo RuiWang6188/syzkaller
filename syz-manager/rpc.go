@@ -277,6 +277,21 @@ func (serv *RPCServer) UpdateFuzzingIter(a *int, r *int) error {
 	return nil
 }
 
+func (serv *RPCServer) ReceiveCover(a *rpctype.ReceiveCoverArgs, r *int) error {
+	serv.mu.Lock()
+	defer serv.mu.Unlock()
+
+	serv.corpusCover.MergeDiff(a.Cover)
+	// log.Logf(0, "serv.corpusCover: %v", serv.corpusCover)
+	serv.stats.corpusCover.set(len(serv.corpusCover))
+	// log.Logf(0, "serv.stats.corpusCover: %v", serv.stats.corpusCover.get())
+
+	serv.stats.fuzzingIterations.inc()
+	log.Logf(0, "fuzzing iter: %v", serv.stats.fuzzingIterations.get())
+
+	return nil
+}
+
 func (serv *RPCServer) NewInput(a *rpctype.NewInputArgs, r *int) error {
 	bad, disabled := checkProgram(serv.cfg.Target, serv.targetEnabledSyscalls, a.Input.Prog)
 	if bad != nil || disabled {

@@ -41,7 +41,7 @@ const maxBlobLen = uint64(100 << 10)
 // ct:          ChoiceTable for syscalls.
 // noMutate:    Set of IDs of syscalls which should not be mutated.
 // corpus:      The entire corpus, including original program p.
-func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, noMutate map[int]bool, corpus []*Prog) {
+func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, noMutate map[int]bool, useML bool) {
 	log.Logf(0, "[Mutate] mutating program: %v", hash.String(p.Serialize()))
 	r := newRand(p.Target, rs)
 	if ncalls < len(p.Calls) {
@@ -53,7 +53,7 @@ func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, noMutate map[
 		ncalls:   ncalls,
 		ct:       ct,
 		noMutate: noMutate,
-		corpus:   corpus,
+		corpus:   nil,
 	}
 
 	log.Logf(0, "start mutation loop for prog: %v", hash.String(p.Serialize()))
@@ -75,10 +75,8 @@ func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, noMutate map[
 	// 	}
 	// }
 
-	accuracy := 1.0
-	log.Logf(0, "accuracy: %v", accuracy)
 	for stop, ok := false, false; !stop; stop = ok && len(p.Calls) != 0 {
-		if r.Float64() > accuracy {
+		if !useML {
 			ok = ctx.mutateArgSyz()
 		} else {
 			ok = ctx.mutateArg()
@@ -292,7 +290,7 @@ func loadMLMutationDataset(csvFilePath string) (MLProgMutateInfo, error) {
 func getModelOutput(p *Prog, r *randGen) (MLProgMutateInfo, error) {
 	// 1. find the corresponding base prog dir in the corpus
 	// TODO (Rui): make this configurable
-	modelOutputDir := "/root/1000"
+	modelOutputDir := "/root/1"
 	progHash := hash.String(p.Serialize())
 	log.Logf(0, "prog hash: %v", progHash)
 	progHashDir := path.Join(modelOutputDir, progHash)
@@ -422,7 +420,7 @@ func (ctx *mutator) mutateArgSyz() bool {
 		}
 		s := analyze(ctx.ct, ctx.corpus, p, c)
 		arg, argCtx := ma.chooseArg(r.Rand)
-		calls, ok1 := p.Target.mutateArg(s, arg, argCtx, &updateSizes)
+		calls, ok1 := p.Target.mutateArg(r, s, arg, argCtx, &updateSizes)
 		if !ok1 {
 			ok = false
 			continue
@@ -475,7 +473,7 @@ func (ctx *mutator) mutateArg() bool {
 	arg, argCtx := findArg(p, modelOutput)
 	// arg, argCtx := ma.chooseArg(r.Rand)
 
-	calls, ok := p.Target.mutateArg(s, arg, argCtx, &updateSizes)
+	calls, ok := p.Target.mutateArg(r, s, arg, argCtx, &updateSizes)
 	if !ok {
 		log.Logf(0, "Target.mutateArg failed")
 		return false
@@ -516,10 +514,10 @@ func chooseCall(p *Prog, r *randGen) int {
 	return sort.SearchFloat64s(callPriorities, prioSum*r.Float64())
 }
 
-func (target *Target) mutateArg(s *state, arg Arg, ctx ArgCtx, updateSizes *bool) ([]*Call, bool) {
-	seed := int64(12345)
-	src := rand.NewSource(seed)
-	r := newRand(target, src)
+func (target *Target) mutateArg(r *randGen, s *state, arg Arg, ctx ArgCtx, updateSizes *bool) ([]*Call, bool) {
+	// seed := int64(12345)
+	// src := rand.NewSource(seed)
+	// r := newRand(target, src)
 	var baseSize uint64
 	if ctx.Base != nil {
 		baseSize = ctx.Base.Res.Size()

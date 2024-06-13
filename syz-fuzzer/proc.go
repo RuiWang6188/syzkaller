@@ -40,7 +40,7 @@ func newProc(fuzzer *Fuzzer, pid int) (*Proc, error) {
 	if err != nil {
 		return nil, err
 	}
-	seed := int64(20240604)
+	seed := int64(time.Now().UnixNano() + int64(pid)*1e12)
 	rnd := rand.New(rand.NewSource(seed))
 	execOptsCollide := *fuzzer.execOpts
 	execOptsCollide.Flags &= ^ipc.FlagCollectSignal
@@ -66,23 +66,105 @@ func (proc *Proc) loop() {
 	totalCorpus := len(proc.fuzzer.corpus)
 	for i := 0; i < totalCorpus; i++ {
 		p := proc.fuzzer.corpus[i]
-		a := 0
-		if err := proc.fuzzer.manager.Call("Manager.UpdateFuzzingIter", &a, nil); err != nil {
-			log.SyzFatalf("Manager.UpdateFuzzingIter call failed: %v", err)
-		}
-		proc.triageProg(p.Clone())
+
+		progCoverHistory := make([][]uint32, 0)
+
 		for j := 0; j < 100; j++ {
 			log.Logf(0, "prog %v, mutation index: %v", i, j)
 			pe := p.Clone()
-			pe.Mutate(proc.rnd, prog.RecommendedCalls, proc.fuzzer.choiceTable, proc.fuzzer.noMutate, nil)
-			if err := proc.fuzzer.manager.Call("Manager.UpdateFuzzingIter", &a, nil); err != nil {
-				log.SyzFatalf("Manager.UpdateFuzzingIter call failed: %v", err)
+
+			accuracy := 1.0
+			log.Logf(0, "accuracy: %v", accuracy)
+
+			useML := false
+			if proc.rnd.Float64() > accuracy {
+				useML = false
+			} else {
+				useML = true
 			}
-			log.Logf(1, "#%v: mutated", proc.pid)
-			proc.triageProg(pe)
-			// proc.executeAndCollide(proc.execOpts, pe, ProgNormal, StatFuzz)
+
+			pe.Mutate(proc.rnd, prog.RecommendedCalls, proc.fuzzer.choiceTable, proc.fuzzer.noMutate, useML)
+			currentCover, err := proc.executeAndCollectCoverage(pe)
+			if err != nil {
+				log.Logf(0, "executeAndCollectCoverage error: %v", err)
+				continue
+			}
+			progCoverHistory = append(progCoverHistory, currentCover)
 		}
+
+		// find the longest coverage in the history
+		longestCover := []uint32{}
+		for _, cover := range progCoverHistory {
+			if len(cover) > len(longestCover) {
+				longestCover = cover
+			}
+		}
+
+		log.Logf(0, "coverage for current iteration: %v", len(longestCover))
+		proc.fuzzer.sendCoverageToManager(longestCover)
 	}
+}
+
+func (proc *Proc) executeAndCollectCoverage(p *prog.Prog) ([]uint32, error) {
+	log.Logf(0, "executeAndCollectCoverage: %v", hash.String(p.Serialize()))
+	initial_info := proc.executeRaw(proc.execOpts, p, StatTriage)
+	// log.Logf(0, "executeAndCollectCoverage: initial_info: %v", initial_info)
+	if initial_info == nil {
+		return []uint32{}, fmt.Errorf("initial_info is nil")
+	}
+	calls, extra := proc.fuzzer.checkNewSignal(p, initial_info)
+
+	log.Logf(0, "executeAndCollectCoverage: calls=%v, extra=%v", calls, extra)
+
+	var progCover cover.Cover
+
+	for _, callIndex := range calls {
+		log.Logf(0, "executeAndCollectCoverage: callIndex=%v", callIndex)
+		initial_info.Calls[callIndex].Signal = append([]uint32{}, initial_info.Calls[callIndex].Signal...)
+		initial_info.Calls[callIndex].Cover = nil
+
+		callName := p.Calls[callIndex].Meta.Name
+		logCallName := fmt.Sprintf("call #%v %v", callIndex, callName)
+		log.Logf(0, "executeAndCollectCoverage: %v", logCallName)
+
+		callInfo := initial_info.Calls[callIndex]
+		notexecuted := 0
+		rawCover := []uint32{}
+		var syscallCover cover.Cover
+
+		for i := 0; i < 3; i++ {
+			info := proc.executeRaw(proc.execOptsCover, p, StatTriage)
+
+			if !reexecutionSuccess(info, &callInfo, callIndex) {
+				log.Logf(0, "not executed success")
+				notexecuted++
+				if notexecuted > 3/2+1 {
+					log.Logf(0, "[early return] not executed too many times: %v", notexecuted)
+					return []uint32{}, fmt.Errorf("not executed too many times")
+				}
+				continue
+			}
+
+			_, thisCover := getSignalAndCover(p, info, callIndex)
+			log.Logf(0, "[call %v] thisCover: %v", callIndex, len(thisCover))
+			if len(rawCover) == 0 && proc.fuzzer.fetchRawCover {
+				rawCover = append([]uint32{}, thisCover...)
+			}
+			syscallCover.Merge(thisCover)
+		}
+
+		progCover.Merge(syscallCover.Serialize())
+
+	}
+
+	if extra {
+		panic("executeAndCollectCoverage: extra")
+	}
+
+	log.Logf(0, "executeAndCollectCoverage: progCover: %v", len(progCover.Serialize()))
+
+	// proc.fuzzer.sendCoverageToManager(progCover.Serialize())
+	return progCover.Serialize(), nil
 }
 
 func (proc *Proc) triageProg(p *prog.Prog) {
@@ -266,11 +348,11 @@ func (proc *Proc) smashInput(item *WorkSmash) {
 		return // Don't smash unprofiled programs.
 	}
 
-	fuzzerSnapshot := proc.fuzzer.snapshot()
+	// fuzzerSnapshot := proc.fuzzer.snapshot()
 	for i := 0; i < 100; i++ {
 		p := item.p.Clone()
 		log.Logf(0, "[BM] to be smashed program: %v", hash.String(p.Serialize()))
-		p.Mutate(proc.rnd, prog.RecommendedCalls, proc.fuzzer.choiceTable, proc.fuzzer.noMutate, fuzzerSnapshot.corpus)
+		p.Mutate(proc.rnd, prog.RecommendedCalls, proc.fuzzer.choiceTable, proc.fuzzer.noMutate, false)
 		log.Logf(1, "#%v: smash mutated", proc.pid)
 		proc.executeAndCollide(proc.execOpts, p, ProgNormal, StatSmash)
 	}
