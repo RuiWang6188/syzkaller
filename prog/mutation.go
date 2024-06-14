@@ -539,7 +539,8 @@ func (ctx *mutator) mutateArg() ([]*Prog, bool) {
 			idx--
 			cp.RemoveCall(idx)
 		}
-		if idx < 0 || idx >= len(cp.Calls) || cp.Calls[idx] != c {
+
+		if idx < 0 || idx >= len(cp.Calls) || cp.Calls[idx].Meta != c.Meta {
 			log.Logf(0, "cp.Calls[idx]: %v", cp.Calls[idx])
 			log.Logf(0, "c: %v", c)
 			log.Logf(0, "cp.Calls[idx] != c: %v", cp.Calls[idx] != c)
