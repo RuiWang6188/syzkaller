@@ -40,7 +40,8 @@ func newProc(fuzzer *Fuzzer, pid int) (*Proc, error) {
 	if err != nil {
 		return nil, err
 	}
-	seed := int64(time.Now().UnixNano() + int64(pid)*1e12)
+	seed := int64(123456)
+	// seed := int64(time.Now().UnixNano() + int64(pid)*1e12)
 	rnd := rand.New(rand.NewSource(seed))
 	execOptsCollide := *fuzzer.execOpts
 	execOptsCollide.Flags &= ^ipc.FlagCollectSignal
@@ -73,6 +74,24 @@ func (proc *Proc) loop() {
 			log.Logf(0, "prog %v, mutation index: %v", i, j)
 			pe := p.Clone()
 
+			log.Logf(0, "pe.Calls after Clone():")
+			for i, call := range pe.Calls {
+				log.Logf(0, "call %v: %v", i, call)
+			}
+
+			log.Logf(0, "p.Calls afterClone():")
+			for i, call := range p.Calls {
+				log.Logf(0, "call %v: %v", i, call)
+			}
+
+			for i, call := range pe.Calls {
+				if call == p.Calls[i] {
+					log.Logf(0, "call %v: same", i)
+				} else {
+					log.Logf(0, "call %v: different", i)
+				}
+			}
+
 			accuracy := 1.0
 			log.Logf(0, "accuracy: %v", accuracy)
 
@@ -83,13 +102,16 @@ func (proc *Proc) loop() {
 				useML = true
 			}
 
-			pe.Mutate(proc.rnd, prog.RecommendedCalls, proc.fuzzer.choiceTable, proc.fuzzer.noMutate, useML)
-			currentCover, err := proc.executeAndCollectCoverage(pe)
-			if err != nil {
-				log.Logf(0, "executeAndCollectCoverage error: %v", err)
-				continue
+			progs := pe.Mutate(proc.rnd, prog.RecommendedCalls, proc.fuzzer.choiceTable, proc.fuzzer.noMutate, useML)
+			for idx, p := range progs {
+				log.Logf(0, "mutation index %v, mutated program %v: %v", j, idx, hash.String(p.Serialize()))
+				currentCover, err := proc.executeAndCollectCoverage(p)
+				if err != nil {
+					log.Logf(0, "executeAndCollectCoverage error: %v", err)
+					continue
+				}
+				progCoverHistory = append(progCoverHistory, currentCover)
 			}
-			progCoverHistory = append(progCoverHistory, currentCover)
 		}
 
 		// find the longest coverage in the history

@@ -41,7 +41,7 @@ const maxBlobLen = uint64(100 << 10)
 // ct:          ChoiceTable for syscalls.
 // noMutate:    Set of IDs of syscalls which should not be mutated.
 // corpus:      The entire corpus, including original program p.
-func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, noMutate map[int]bool, useML bool) {
+func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, noMutate map[int]bool, useML bool) []*Prog {
 	log.Logf(0, "[Mutate] mutating program: %v", hash.String(p.Serialize()))
 	r := newRand(p.Target, rs)
 	if ncalls < len(p.Calls) {
@@ -74,12 +74,13 @@ func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, noMutate map[
 	// 		ok = ctx.removeCall()
 	// 	}
 	// }
-
+	mutatedProgs := make([]*Prog, 0)
 	for stop, ok := false, false; !stop; stop = ok && len(p.Calls) != 0 {
 		if !useML {
-			ok = ctx.mutateArgSyz()
+			mutatedProgs, ok = ctx.mutateArgSyz()
 		} else {
-			ok = ctx.mutateArg()
+			mutatedProgs, ok = ctx.mutateArg()
+
 		}
 		log.Logf(0, "[Mutate] mutation success: %v", ok)
 		log.Logf(0, "p.Calls len: %v", len(p.Calls))
@@ -91,6 +92,7 @@ func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, noMutate map[
 	if got := len(p.Calls); got < 1 || got > ncalls {
 		panic(fmt.Sprintf("bad number of calls after mutation: %v, want [1, %v]", got, ncalls))
 	}
+	return mutatedProgs
 }
 
 // Internal state required for performing mutations -- currently this matches
@@ -393,30 +395,32 @@ func findArg(p *Prog, modelOutput MLProgMutateInfo) (Arg, ArgCtx) {
 	return ma.args[argIdxOffset].arg, ma.args[argIdxOffset].ctx
 }
 
-func (ctx *mutator) mutateArgSyz() bool {
+func (ctx *mutator) mutateArgSyz() ([]*Prog, bool) {
 	log.Logf(0, "mutateArgSyz()")
 	p, r := ctx.p, ctx.r
 	if len(p.Calls) == 0 {
-		return false
+		return nil, false
 	}
 
 	idx := chooseCall(p, r)
 	if idx < 0 {
-		return false
+		return nil, false
 	}
 	c := p.Calls[idx]
 	if ctx.noMutate[c.Meta.ID] {
-		return false
+		return nil, false
 	}
+	mutatedProgs := make([]*Prog, 0)
 	log.Logf(0, "mutate call index: %v", idx)
 	log.Logf(0, "mutate call: %v", c.Meta.Name)
 	updateSizes := true
 	for stop, ok := false, false; !stop; stop = ok && r.oneOf(3) {
+		mutatedProgs = make([]*Prog, 0)
 		ok = true
 		ma := &mutationArgs{target: p.Target}
 		ForeachArg(c, ma.collectArg)
 		if len(ma.args) == 0 {
-			return false
+			return nil, false
 		}
 		s := analyze(ctx.ct, ctx.corpus, p, c)
 		arg, argCtx := ma.chooseArg(r.Rand)
@@ -438,60 +442,129 @@ func (ctx *mutator) mutateArgSyz() bool {
 		if updateSizes {
 			p.Target.assignSizesCall(c)
 		}
+		mutatedProgs = append(mutatedProgs, p.Clone())
 	}
-	return true
+	return mutatedProgs, true
 }
 
 // Mutate an argument of a random call.
-func (ctx *mutator) mutateArg() bool {
+func (ctx *mutator) mutateArg() ([]*Prog, bool) {
 	log.Logf(0, "mutateArg()")
 	p, r := ctx.p, ctx.r
 	if len(p.Calls) == 0 {
-		return false
+		return nil, false
+	}
+
+	log.Logf(0, "p.Calls:")
+	for i, call := range p.Calls {
+		log.Logf(0, "call %v: %v", i, call)
 	}
 
 	modelOutput, err := getModelOutput(p, r)
 	if err != nil {
 		fmt.Println("get model output failed: ", err)
-		return false
+		return nil, false
 	}
 
-	idx := modelOutput.ProgCallIndex
-
-	if idx < 0 {
-		return false
+	log.Logf(0, "p.Calls after after getModelOutput():")
+	for i, call := range p.Calls {
+		log.Logf(0, "call %v: %v", i, call)
 	}
-	c := p.Calls[idx]
+
+	callIdx := modelOutput.ProgCallIndex
+
+	if callIdx < 0 {
+		return nil, false
+	}
+
+	log.Logf(0, "callIdx: %v", callIdx)
+
+	c := p.Calls[callIdx]
 	if ctx.noMutate[c.Meta.ID] {
 		log.Logf(0, "no mutate syscall")
-		return false
+		return nil, false
 	}
 	updateSizes := true
 
 	s := analyze(ctx.ct, ctx.corpus, p, c)
 
+	log.Logf(0, "p.Calls after after analyze():")
+	for i, call := range p.Calls {
+		log.Logf(0, "call %v: %v", i, call)
+	}
+
 	arg, argCtx := findArg(p, modelOutput)
 	// arg, argCtx := ma.chooseArg(r.Rand)
 
-	calls, ok := p.Target.mutateArg(r, s, arg, argCtx, &updateSizes)
-	if !ok {
-		log.Logf(0, "Target.mutateArg failed")
-		return false
+	log.Logf(0, "p.Calls after after findArg():")
+	for i, call := range p.Calls {
+		log.Logf(0, "call %v: %v", i, call)
 	}
-	p.insertBefore(c, calls)
-	idx += len(calls)
-	for len(p.Calls) > ctx.ncalls {
-		idx--
-		p.RemoveCall(idx)
+
+	mutatedProgs := make([]*Prog, 0)
+
+	// mutate arg for 10 times
+	for i := 0; i < 10; i++ {
+		log.Logf(0, "mutateArg index: %v", i)
+
+		cp := p.Clone()
+		idx := callIdx
+
+		log.Logf(0, "cp.Calls after Clone():")
+		for i, call := range cp.Calls {
+			log.Logf(0, "call %v: %v", i, call)
+		}
+
+		calls, ok := cp.Target.mutateArg(r, s, arg, argCtx, &updateSizes)
+
+		log.Logf(0, "cp.Calls after mutateArg():")
+
+		for i, call := range cp.Calls {
+			log.Logf(0, "call %v: %v", i, call)
+		}
+
+		if !ok {
+			log.Logf(0, "Target.mutateArg failed")
+			continue
+		}
+		cp.insertBefore(c, calls)
+
+		log.Logf(0, "cp.Calls after insertBefore():")
+		for i, call := range cp.Calls {
+			log.Logf(0, "call %v: %v", i, call)
+		}
+
+		idx += len(calls)
+		for len(cp.Calls) > ctx.ncalls {
+			idx--
+			cp.RemoveCall(idx)
+		}
+		if idx < 0 || idx >= len(cp.Calls) || cp.Calls[idx] != c {
+			log.Logf(0, "cp.Calls[idx]: %v", cp.Calls[idx])
+			log.Logf(0, "c: %v", c)
+			log.Logf(0, "cp.Calls[idx] != c: %v", cp.Calls[idx] != c)
+			log.Logf(0, "cp.Calls after before panic():")
+			for i, call := range cp.Calls {
+				log.Logf(0, "call %v: %v", i, call)
+			}
+
+			log.Logf(0, "p.Calls after before panic():")
+			for i, call := range p.Calls {
+				log.Logf(0, "call %v: %v", i, call)
+			}
+
+			panic(fmt.Sprintf("wrong call index: idx=%v calls=%v cp.Calls=%v ncalls=%v",
+				idx, len(calls), len(cp.Calls), ctx.ncalls))
+		}
+		if updateSizes {
+			cp.Target.assignSizesCall(c)
+		}
+
+		mutatedProgs = append(mutatedProgs, cp)
+
 	}
-	if idx < 0 || idx >= len(p.Calls) || p.Calls[idx] != c {
-		panic(fmt.Sprintf("wrong call index: idx=%v calls=%v p.Calls=%v ncalls=%v",
-			idx, len(calls), len(p.Calls), ctx.ncalls))
-	}
-	if updateSizes {
-		p.Target.assignSizesCall(c)
-	}
-	return true
+
+	return mutatedProgs, true
 }
 
 // Select a call based on the complexity of the arguments.
