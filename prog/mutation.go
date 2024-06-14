@@ -86,12 +86,12 @@ func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, noMutate map[
 		log.Logf(0, "p.Calls len: %v", len(p.Calls))
 	}
 
-	log.Logf(0, "[Mutate] stop mutation loop for prog: %v", hash.String(p.Serialize()))
-	p.sanitizeFix()
-	p.debugValidate()
-	if got := len(p.Calls); got < 1 || got > ncalls {
-		panic(fmt.Sprintf("bad number of calls after mutation: %v, want [1, %v]", got, ncalls))
-	}
+	// log.Logf(0, "[Mutate] stop mutation loop for prog: %v", hash.String(p.Serialize()))
+	// p.sanitizeFix()
+	// p.debugValidate()
+	// if got := len(p.Calls); got < 1 || got > ncalls {
+	// 	panic(fmt.Sprintf("bad number of calls after mutation: %v, want [1, %v]", got, ncalls))
+	// }
 	return mutatedProgs
 }
 
@@ -292,7 +292,7 @@ func loadMLMutationDataset(csvFilePath string) (MLProgMutateInfo, error) {
 func getModelOutput(p *Prog, r *randGen) (MLProgMutateInfo, error) {
 	// 1. find the corresponding base prog dir in the corpus
 	// TODO (Rui): make this configurable
-	modelOutputDir := "/root/1"
+	modelOutputDir := "/root/1000"
 	progHash := hash.String(p.Serialize())
 	log.Logf(0, "prog hash: %v", progHash)
 	progHashDir := path.Join(modelOutputDir, progHash)
@@ -454,6 +454,7 @@ func (ctx *mutator) mutateArg() ([]*Prog, bool) {
 	if len(p.Calls) == 0 {
 		return nil, false
 	}
+	p_origin := p.Clone()
 
 	log.Logf(0, "p.Calls:")
 	for i, call := range p.Calls {
@@ -479,15 +480,6 @@ func (ctx *mutator) mutateArg() ([]*Prog, bool) {
 
 	log.Logf(0, "callIdx: %v", callIdx)
 
-	c := p.Calls[callIdx]
-	if ctx.noMutate[c.Meta.ID] {
-		log.Logf(0, "no mutate syscall")
-		return nil, false
-	}
-	updateSizes := true
-
-	s := analyze(ctx.ct, ctx.corpus, p, c)
-
 	log.Logf(0, "p.Calls after after analyze():")
 	for i, call := range p.Calls {
 		log.Logf(0, "call %v: %v", i, call)
@@ -503,36 +495,30 @@ func (ctx *mutator) mutateArg() ([]*Prog, bool) {
 
 	mutatedProgs := make([]*Prog, 0)
 
-	// mutate arg for 10 times
-	for i := 0; i < 10; i++ {
+	// mutate arg for N times for a given selected arg
+	for i := 0; i < 50; i++ {
 		log.Logf(0, "mutateArg index: %v", i)
 
-		cp := p.Clone()
 		idx := callIdx
+		cp := p_origin.Clone()
 
-		log.Logf(0, "cp.Calls after Clone():")
-		for i, call := range cp.Calls {
-			log.Logf(0, "call %v: %v", i, call)
+		cp_c := cp.Calls[idx]
+
+		if ctx.noMutate[cp_c.Meta.ID] {
+			log.Logf(0, "no mutate syscall")
+			return nil, false
 		}
+		updateSizes := true
+
+		s := analyze(ctx.ct, ctx.corpus, cp, cp_c)
 
 		calls, ok := cp.Target.mutateArg(r, s, arg, argCtx, &updateSizes)
-
-		log.Logf(0, "cp.Calls after mutateArg():")
-
-		for i, call := range cp.Calls {
-			log.Logf(0, "call %v: %v", i, call)
-		}
 
 		if !ok {
 			log.Logf(0, "Target.mutateArg failed")
 			continue
 		}
-		cp.insertBefore(c, calls)
-
-		log.Logf(0, "cp.Calls after insertBefore():")
-		for i, call := range cp.Calls {
-			log.Logf(0, "call %v: %v", i, call)
-		}
+		cp.insertBefore(cp_c, calls)
 
 		idx += len(calls)
 		for len(cp.Calls) > ctx.ncalls {
@@ -540,25 +526,12 @@ func (ctx *mutator) mutateArg() ([]*Prog, bool) {
 			cp.RemoveCall(idx)
 		}
 
-		if idx < 0 || idx >= len(cp.Calls) || cp.Calls[idx].Meta != c.Meta {
-			log.Logf(0, "cp.Calls[idx]: %v", cp.Calls[idx])
-			log.Logf(0, "c: %v", c)
-			log.Logf(0, "cp.Calls[idx] != c: %v", cp.Calls[idx] != c)
-			log.Logf(0, "cp.Calls after before panic():")
-			for i, call := range cp.Calls {
-				log.Logf(0, "call %v: %v", i, call)
-			}
-
-			log.Logf(0, "p.Calls after before panic():")
-			for i, call := range p.Calls {
-				log.Logf(0, "call %v: %v", i, call)
-			}
-
+		if idx < 0 || idx >= len(cp.Calls) || cp.Calls[idx] != cp_c {
 			panic(fmt.Sprintf("wrong call index: idx=%v calls=%v cp.Calls=%v ncalls=%v",
 				idx, len(calls), len(cp.Calls), ctx.ncalls))
 		}
 		if updateSizes {
-			cp.Target.assignSizesCall(c)
+			cp.Target.assignSizesCall(cp_c)
 		}
 
 		mutatedProgs = append(mutatedProgs, cp)

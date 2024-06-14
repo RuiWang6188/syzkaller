@@ -442,7 +442,7 @@ func (fuzzer *Fuzzer) getBaseProgs() []*prog.Prog {
 			continue
 		}
 		progHash := hash.String(p.Serialize())
-		progPath := path.Join("/root/1", progHash)
+		progPath := path.Join("/root/1000", progHash)
 		if _, err := os.Stat(progPath); os.IsNotExist(err) {
 			log.Logf(0, "prog %v not exists in %v", progHash, progPath)
 			continue
