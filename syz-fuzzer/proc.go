@@ -74,7 +74,7 @@ func (proc *Proc) loop() {
 			log.Logf(0, "prog %v, mutation index: %v", i, j)
 			pe := p.Clone()
 
-			accuracy := 1.0
+			accuracy := 0.0
 			log.Logf(0, "accuracy: %v", accuracy)
 
 			useML := false
