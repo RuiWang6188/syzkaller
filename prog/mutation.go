@@ -496,7 +496,7 @@ func (ctx *mutator) mutateArg() ([]*Prog, bool) {
 	mutatedProgs := make([]*Prog, 0)
 
 	// mutate arg for N times for a given selected arg
-	for i := 0; i < 50; i++ {
+	for i := 0; i < 1; i++ {
 		log.Logf(0, "mutateArg index: %v", i)
 
 		idx := callIdx
