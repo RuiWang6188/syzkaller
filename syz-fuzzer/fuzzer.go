@@ -450,6 +450,12 @@ func (fuzzer *Fuzzer) getBaseProgs() []*prog.Prog {
 
 		progs = append(progs, p)
 	}
+
+	// sort the progs based on the hash value
+	sort.Slice(progs, func(i, j int) bool {
+		return hash.String(progs[i].Serialize()) < hash.String(progs[j].Serialize())
+	})
+
 	return progs
 }
 

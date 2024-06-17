@@ -86,12 +86,16 @@ func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, noMutate map[
 		log.Logf(0, "p.Calls len: %v", len(p.Calls))
 	}
 
-	// log.Logf(0, "[Mutate] stop mutation loop for prog: %v", hash.String(p.Serialize()))
-	// p.sanitizeFix()
-	// p.debugValidate()
-	// if got := len(p.Calls); got < 1 || got > ncalls {
-	// 	panic(fmt.Sprintf("bad number of calls after mutation: %v, want [1, %v]", got, ncalls))
-	// }
+	for _, prog := range mutatedProgs {
+		prog.sanitizeFix()
+		prog.debugValidate()
+		if got := len(prog.Calls); got < 1 || got > ncalls {
+			panic(fmt.Sprintf("bad number of calls after mutation: %v, want [1, %v]", got, ncalls))
+		}
+	}
+
+	log.Logf(0, "len(mutatedProgs): %v", len(mutatedProgs))
+
 	return mutatedProgs
 }
 
@@ -496,7 +500,7 @@ func (ctx *mutator) mutateArg() ([]*Prog, bool) {
 	mutatedProgs := make([]*Prog, 0)
 
 	// mutate arg for N times for a given selected arg
-	for i := 0; i < 1; i++ {
+	for i := 0; i < 50; i++ {
 		log.Logf(0, "mutateArg index: %v", i)
 
 		idx := callIdx
@@ -535,7 +539,6 @@ func (ctx *mutator) mutateArg() ([]*Prog, bool) {
 		}
 
 		mutatedProgs = append(mutatedProgs, cp)
-
 	}
 
 	return mutatedProgs, true

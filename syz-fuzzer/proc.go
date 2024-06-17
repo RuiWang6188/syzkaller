@@ -87,7 +87,7 @@ func (proc *Proc) loop() {
 			progs := pe.Mutate(proc.rnd, prog.RecommendedCalls, proc.fuzzer.choiceTable, proc.fuzzer.noMutate, useML)
 			var currentAggregatedCover cover.Cover
 			for idx, p := range progs {
-				log.Logf(0, "mutation index %v, mutated program %v: %v", j, idx, hash.String(p.Serialize()))
+				log.Logf(0, "prog %v, mutation index %v, mutated program %v: %v", i, j, idx, hash.String(p.Serialize()))
 				currentCover, err := proc.executeAndCollectCoverage(p)
 				if err != nil {
 					log.Logf(0, "executeAndCollectCoverage error: %v", err)
@@ -99,16 +99,15 @@ func (proc *Proc) loop() {
 			progCoverHistory = append(progCoverHistory, currentAggregatedCover.Serialize())
 		}
 
+		log.Logf(0, "len(progCoverHistory): %v", len(progCoverHistory))
 		// find the longest coverage in the history
-		longestCover := []uint32{}
+		var aggCover cover.Cover
 		for _, cover := range progCoverHistory {
-			if len(cover) > len(longestCover) {
-				longestCover = cover
-			}
+			aggCover.Merge(cover)
 		}
 
-		log.Logf(0, "coverage for current iteration: %v", len(longestCover))
-		proc.fuzzer.sendCoverageToManager(longestCover)
+		log.Logf(0, "coverage for current iteration: %v", len(aggCover))
+		proc.fuzzer.sendCoverageToManager(aggCover.Serialize())
 	}
 }
 
