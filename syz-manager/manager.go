@@ -593,7 +593,7 @@ func (pool *ResourcePool) TakeOne() *int {
 
 func (mgr *Manager) preloadCorpus() {
 	log.Logf(0, "loading corpus...")
-	corpus_name := "corpus-1.db"
+	corpus_name := "corpus-1000-0.db"
 	log.Logf(0, "loading corpus from %v", filepath.Join(mgr.cfg.Workdir, corpus_name))
 	corpusDB, err := db.Open(filepath.Join(mgr.cfg.Workdir, corpus_name), true)
 	if err != nil {
@@ -758,7 +758,7 @@ func checkProgram(target *prog.Target, enabled map[*prog.Syscall]bool, data []by
 }
 
 func (mgr *Manager) runInstance(index int) (*Crash, error) {
-	mgr.checkUsedFiles()
+	// mgr.checkUsedFiles()
 	instanceName := fmt.Sprintf("vm-%d", index)
 
 	rep, vmInfo, err := mgr.runInstanceInner(index, instanceName)

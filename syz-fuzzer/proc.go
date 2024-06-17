@@ -40,7 +40,8 @@ func newProc(fuzzer *Fuzzer, pid int) (*Proc, error) {
 	if err != nil {
 		return nil, err
 	}
-	seed := int64(time.Now().UnixNano() + int64(pid)*1e12)
+	// seed := int64(time.Now().UnixNano() + int64(pid)*1e12)
+	seed := int64(123456)
 	rnd := rand.New(rand.NewSource(seed))
 	execOptsCollide := *fuzzer.execOpts
 	execOptsCollide.Flags &= ^ipc.FlagCollectSignal
@@ -69,11 +70,11 @@ func (proc *Proc) loop() {
 
 		progCoverHistory := make([][]uint32, 0)
 
-		for j := 0; j < 100; j++ {
+		for j := 0; j < 10; j++ {
 			log.Logf(0, "prog %v, mutation index: %v", i, j)
 			pe := p.Clone()
 
-			accuracy := 1.0
+			accuracy := 0.0
 			log.Logf(0, "accuracy: %v", accuracy)
 
 			useML := false
@@ -93,15 +94,13 @@ func (proc *Proc) loop() {
 		}
 
 		// find the longest coverage in the history
-		longestCover := []uint32{}
+		var thisCover cover.Cover
 		for _, cover := range progCoverHistory {
-			if len(cover) > len(longestCover) {
-				longestCover = cover
-			}
+			thisCover.Merge(cover)
 		}
 
-		log.Logf(0, "coverage for current iteration: %v", len(longestCover))
-		proc.fuzzer.sendCoverageToManager(longestCover)
+		log.Logf(0, "coverage for current iteration: %v", len(thisCover))
+		proc.fuzzer.sendCoverageToManager(thisCover.Serialize())
 	}
 }
 

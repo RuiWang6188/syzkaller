@@ -290,7 +290,7 @@ func loadMLMutationDataset(csvFilePath string) (MLProgMutateInfo, error) {
 func getModelOutput(p *Prog, r *randGen) (MLProgMutateInfo, error) {
 	// 1. find the corresponding base prog dir in the corpus
 	// TODO (Rui): make this configurable
-	modelOutputDir := "/root/1"
+	modelOutputDir := "/root/1000"
 	progHash := hash.String(p.Serialize())
 	log.Logf(0, "prog hash: %v", progHash)
 	progHashDir := path.Join(modelOutputDir, progHash)

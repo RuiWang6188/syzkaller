@@ -121,9 +121,9 @@ func checkMachine(args *checkArgs) (*rpctype.CheckArgs, error) {
 	done := make(chan bool)
 	defer close(done)
 	go checkMachineHeartbeats(done)
-	if err := checkRevisions(args); err != nil {
-		return nil, err
-	}
+	// if err := checkRevisions(args); err != nil {
+	// 	return nil, err
+	// }
 	globFiles, err := host.CollectGlobsInfo(args.target.GetGlobs())
 	if err != nil {
 		return nil, fmt.Errorf("failed to collect glob info: %w", err)
