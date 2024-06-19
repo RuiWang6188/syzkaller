@@ -331,6 +331,7 @@ func (serv *RPCServer) NewInput(a *rpctype.NewInputArgs, r *int) error {
 	}
 	diff := serv.corpusCover.MergeDiff(a.Cover)
 	log.Logf(0, "serv.corpusCover: %v", serv.corpusCover)
+	fmt.Println("serv.corpusCover: ", serv.corpusCover)
 	serv.stats.corpusCover.set(len(serv.corpusCover))
 	log.Logf(0, "serv.stats.corpusCover: %v", serv.stats.corpusCover.get())
 	if len(diff) != 0 && serv.coverFilter != nil {

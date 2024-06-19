@@ -85,7 +85,7 @@ func (proc *Proc) loop() {
 			}
 
 			progs := pe.Mutate(proc.rnd, prog.RecommendedCalls, proc.fuzzer.choiceTable, proc.fuzzer.noMutate, useML)
-			var currentAggregatedCover cover.Cover
+			var mutatedAggregatedCover cover.Cover
 			for idx, p := range progs {
 				log.Logf(0, "prog %v, mutation index %v, mutated program %v: %v", i, j, idx, hash.String(p.Serialize()))
 				currentCover, err := proc.executeAndCollectCoverage(p)
@@ -93,10 +93,10 @@ func (proc *Proc) loop() {
 					log.Logf(0, "executeAndCollectCoverage error: %v", err)
 					continue
 				}
-				currentAggregatedCover.Merge(currentCover)
+				mutatedAggregatedCover.Merge(currentCover)
 			}
-			log.Logf(0, "aggregated coverage for this mutation: %v", len(currentAggregatedCover))
-			progCoverHistory = append(progCoverHistory, currentAggregatedCover.Serialize())
+			log.Logf(0, "aggregated coverage for this mutation: %v", len(mutatedAggregatedCover))
+			progCoverHistory = append(progCoverHistory, mutatedAggregatedCover.Serialize())
 		}
 
 		log.Logf(0, "len(progCoverHistory): %v", len(progCoverHistory))
@@ -114,7 +114,7 @@ func (proc *Proc) loop() {
 func (proc *Proc) executeAndCollectCoverage(p *prog.Prog) ([]uint32, error) {
 	log.Logf(0, "executeAndCollectCoverage: %v", hash.String(p.Serialize()))
 	initial_info := proc.executeRaw(proc.execOpts, p, StatTriage)
-	// log.Logf(0, "executeAndCollectCoverage: initial_info: %v", initial_info)
+	log.Logf(0, "executeAndCollectCoverage: initial_info: %v", initial_info)
 	if initial_info == nil {
 		return []uint32{}, fmt.Errorf("initial_info is nil")
 	}

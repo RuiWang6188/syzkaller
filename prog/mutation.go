@@ -94,6 +94,10 @@ func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, noMutate map[
 		}
 	}
 
+	for idx, prog := range mutatedProgs {
+		log.Logf(0, "[Mutate] mutated program %v: %v", idx, hash.String(prog.Serialize()))
+	}
+
 	log.Logf(0, "len(mutatedProgs): %v", len(mutatedProgs))
 
 	return mutatedProgs
@@ -458,22 +462,11 @@ func (ctx *mutator) mutateArg() ([]*Prog, bool) {
 	if len(p.Calls) == 0 {
 		return nil, false
 	}
-	p_origin := p.Clone()
-
-	log.Logf(0, "p.Calls:")
-	for i, call := range p.Calls {
-		log.Logf(0, "call %v: %v", i, call)
-	}
 
 	modelOutput, err := getModelOutput(p, r)
 	if err != nil {
 		fmt.Println("get model output failed: ", err)
 		return nil, false
-	}
-
-	log.Logf(0, "p.Calls after after getModelOutput():")
-	for i, call := range p.Calls {
-		log.Logf(0, "call %v: %v", i, call)
 	}
 
 	callIdx := modelOutput.ProgCallIndex
@@ -484,27 +477,14 @@ func (ctx *mutator) mutateArg() ([]*Prog, bool) {
 
 	log.Logf(0, "callIdx: %v", callIdx)
 
-	log.Logf(0, "p.Calls after after analyze():")
-	for i, call := range p.Calls {
-		log.Logf(0, "call %v: %v", i, call)
-	}
-
-	arg, argCtx := findArg(p, modelOutput)
-	// arg, argCtx := ma.chooseArg(r.Rand)
-
-	log.Logf(0, "p.Calls after after findArg():")
-	for i, call := range p.Calls {
-		log.Logf(0, "call %v: %v", i, call)
-	}
-
 	mutatedProgs := make([]*Prog, 0)
 
 	// mutate arg for N times for a given selected arg
-	for i := 0; i < 50; i++ {
-		log.Logf(0, "mutateArg index: %v", i)
+	for len(mutatedProgs) < 30 {
+		// log.Logf(0, "mutateArg index: %v", i)
 
 		idx := callIdx
-		cp := p_origin.Clone()
+		cp := p.Clone()
 
 		cp_c := cp.Calls[idx]
 
@@ -513,6 +493,8 @@ func (ctx *mutator) mutateArg() ([]*Prog, bool) {
 			return nil, false
 		}
 		updateSizes := true
+
+		arg, argCtx := findArg(cp, modelOutput)
 
 		s := analyze(ctx.ct, ctx.corpus, cp, cp_c)
 
@@ -565,9 +547,6 @@ func chooseCall(p *Prog, r *randGen) int {
 }
 
 func (target *Target) mutateArg(r *randGen, s *state, arg Arg, ctx ArgCtx, updateSizes *bool) ([]*Call, bool) {
-	// seed := int64(12345)
-	// src := rand.NewSource(seed)
-	// r := newRand(target, src)
 	var baseSize uint64
 	if ctx.Base != nil {
 		baseSize = ctx.Base.Res.Size()
