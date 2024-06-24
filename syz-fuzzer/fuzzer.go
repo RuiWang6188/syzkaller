@@ -427,6 +427,11 @@ func (fuzzer *Fuzzer) pollLoop() {
 }
 
 func (fuzzer *Fuzzer) getBaseProgs() []*prog.Prog {
+	skipProgs := [...]string{
+		"18c4899a65ac0b81bd956430f8bb38be84473351",
+		"2d3fac57a37b051ce05427e4628b3746baf87e4a",
+	}
+
 	fuzzer.corpusMu.RLock()
 	defer fuzzer.corpusMu.RUnlock()
 	r := &rpctype.GetCandidateRes{}
@@ -446,6 +451,13 @@ func (fuzzer *Fuzzer) getBaseProgs() []*prog.Prog {
 		if _, err := os.Stat(progPath); os.IsNotExist(err) {
 			log.Logf(0, "prog %v not exists in %v", progHash, progPath)
 			continue
+		}
+
+		for _, sp := range skipProgs {
+			if sp == progHash {
+				log.Logf(0, "skip prog %v", progHash)
+				continue
+			}
 		}
 
 		progs = append(progs, p)
