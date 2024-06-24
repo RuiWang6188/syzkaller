@@ -70,21 +70,16 @@ func (proc *Proc) loop() {
 
 		progCoverHistory := make([][]uint32, 0)
 
-		for j := 0; j < 10; j++ {
+		// use original Syzkaller arg mutation for 500 times
+		for j := 0; j < 800; j++ {
 			log.Logf(0, "prog %v, mutation index: %v", i, j)
 			pe := p.Clone()
 
-			accuracy := 0.0
-			log.Logf(0, "accuracy: %v", accuracy)
+			progs := pe.Mutate(proc.rnd, prog.RecommendedCalls, proc.fuzzer.choiceTable, proc.fuzzer.noMutate, prog.Syzkaller)
 
-			useML := false
-			if proc.rnd.Float64() > accuracy {
-				useML = false
-			} else {
-				useML = true
+			if len(progs) != 1 {
+				panic("len(progs) != 1")
 			}
-
-			progs := pe.Mutate(proc.rnd, prog.RecommendedCalls, proc.fuzzer.choiceTable, proc.fuzzer.noMutate, useML)
 			var mutatedAggregatedCover cover.Cover
 			for idx, p := range progs {
 				log.Logf(0, "prog %v, mutation index %v, mutated program %v: %v", i, j, idx, hash.String(p.Serialize()))
@@ -100,11 +95,48 @@ func (proc *Proc) loop() {
 		}
 
 		log.Logf(0, "len(progCoverHistory): %v", len(progCoverHistory))
-		// find the longest coverage in the history
 		var aggCover cover.Cover
-		for _, cover := range progCoverHistory {
+		coverCounter := make(map[int]int)
+		useML := true
+		for idx, cover := range progCoverHistory {
 			aggCover.Merge(cover)
+
+			// double check: collect the last 200 coverages
+			if idx >= len(progCoverHistory)-200 {
+				coverCounter[len(cover)]++
+				if idx == len(progCoverHistory)-1 {
+					continue
+				}
+				// if the current coverage is not the same as the next one, then we won't use the ML
+				if len(cover) != len(progCoverHistory[idx+1]) {
+					useML = false
+				}
+			}
 		}
+
+		log.Logf(0, "coverCounter: %v", coverCounter)
+		var mutatedProgs []*prog.Prog
+		if useML {
+			pe := p.Clone()
+			mutatedProgs = pe.Mutate(proc.rnd, prog.RecommendedCalls, proc.fuzzer.choiceTable, proc.fuzzer.noMutate, prog.ML)
+		} else {
+			pe := p.Clone()
+			mutatedProgs = pe.Mutate(proc.rnd, prog.RecommendedCalls, proc.fuzzer.choiceTable, proc.fuzzer.noMutate, prog.SyzkallerModified)
+		}
+		var mutatedAggregatedCover cover.Cover
+		log.Logf(0, "len(mutatedProgs): %v", len(mutatedProgs))
+		for idx, p := range mutatedProgs {
+			log.Logf(0, "[final mutation] prog %v, mutated program %v: %v", i, idx, hash.String(p.Serialize()))
+			currentCover, err := proc.executeAndCollectCoverage(p)
+			if err != nil {
+				log.Logf(0, "executeAndCollectCoverage error: %v", err)
+				continue
+			}
+			mutatedAggregatedCover.Merge(currentCover)
+		}
+		log.Logf(0, "[final mutation] aggregated mutated coverage for this mutation: %v", len(mutatedAggregatedCover))
+
+		aggCover.Merge(mutatedAggregatedCover.Serialize())
 
 		log.Logf(0, "coverage for current iteration: %v", len(aggCover))
 		proc.fuzzer.sendCoverageToManager(aggCover.Serialize())
@@ -359,7 +391,7 @@ func (proc *Proc) smashInput(item *WorkSmash) {
 	for i := 0; i < 100; i++ {
 		p := item.p.Clone()
 		log.Logf(0, "[BM] to be smashed program: %v", hash.String(p.Serialize()))
-		p.Mutate(proc.rnd, prog.RecommendedCalls, proc.fuzzer.choiceTable, proc.fuzzer.noMutate, false)
+		p.Mutate(proc.rnd, prog.RecommendedCalls, proc.fuzzer.choiceTable, proc.fuzzer.noMutate, prog.Syzkaller)
 		log.Logf(1, "#%v: smash mutated", proc.pid)
 		proc.executeAndCollide(proc.execOpts, p, ProgNormal, StatSmash)
 	}

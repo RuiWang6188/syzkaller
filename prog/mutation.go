@@ -20,6 +20,14 @@ import (
 	"github.com/google/syzkaller/pkg/log"
 )
 
+type MutationType int
+
+const (
+	Syzkaller MutationType = iota
+	SyzkallerModified
+	ML
+)
+
 type MLProgMutateInfo struct {
 	ProgCallIndex int // the syscall index in the program
 	CallIndex     int // the syscall index in the original label file without offset
@@ -41,7 +49,7 @@ const maxBlobLen = uint64(100 << 10)
 // ct:          ChoiceTable for syscalls.
 // noMutate:    Set of IDs of syscalls which should not be mutated.
 // corpus:      The entire corpus, including original program p.
-func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, noMutate map[int]bool, useML bool) []*Prog {
+func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, noMutate map[int]bool, mutationMethod MutationType) []*Prog {
 	log.Logf(0, "[Mutate] mutating program: %v", hash.String(p.Serialize()))
 	r := newRand(p.Target, rs)
 	if ncalls < len(p.Calls) {
@@ -76,11 +84,14 @@ func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, noMutate map[
 	// }
 	mutatedProgs := make([]*Prog, 0)
 	for stop, ok := false, false; !stop; stop = ok && len(p.Calls) != 0 {
-		if !useML {
+		if mutationMethod == SyzkallerModified {
 			mutatedProgs, ok = ctx.mutateArgSyzM()
-		} else {
+		} else if mutationMethod == ML {
 			mutatedProgs, ok = ctx.mutateArg()
-
+		} else if mutationMethod == Syzkaller {
+			mutatedProgs, ok = ctx.mutateArgSyz()
+		} else {
+			panic("unknown mutation method")
 		}
 		log.Logf(0, "[Mutate] mutation success: %v", ok)
 		log.Logf(0, "p.Calls len: %v", len(p.Calls))
@@ -452,7 +463,7 @@ func (ctx *mutator) mutateArgSyz() ([]*Prog, bool) {
 		}
 		mutatedProgs = append(mutatedProgs, p.Clone())
 	}
-	return mutatedProgs, true
+	return mutatedProgs[:1], true
 }
 
 func (ctx *mutator) mutateArgSyzM() ([]*Prog, bool) {
@@ -503,7 +514,8 @@ func (ctx *mutator) mutateArgSyzM() ([]*Prog, bool) {
 		}
 	}
 
-	for len(mutatedProgs) < 30 {
+	// mutate the selected arg for N times
+	for len(mutatedProgs) < 100 {
 		cp := p.Clone()
 		idx := callIdx
 		cp_c := cp.Calls[idx]
@@ -564,7 +576,7 @@ func (ctx *mutator) mutateArg() ([]*Prog, bool) {
 	mutatedProgs := make([]*Prog, 0)
 
 	// mutate arg for N times for a given selected arg
-	for len(mutatedProgs) < 30 {
+	for len(mutatedProgs) < 100 {
 		// log.Logf(0, "mutateArg index: %v", i)
 
 		idx := callIdx

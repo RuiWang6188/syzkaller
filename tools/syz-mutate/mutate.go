@@ -94,7 +94,7 @@ func main() {
 			})
 			return
 		} else {
-			p.Mutate(rs, *flagLen, ct, nil, false)
+			p.Mutate(rs, *flagLen, ct, nil, prog.Syzkaller)
 		}
 	}
 	fmt.Printf("%s\n", p.Serialize())

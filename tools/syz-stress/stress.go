@@ -104,13 +104,13 @@ func main() {
 				if *flagGenerate && len(corpus) == 0 || i%4 != 0 {
 					p = target.Generate(rs, prog.RecommendedCalls, ct)
 					execute(pid, env, execOpts, p)
-					p.Mutate(rs, prog.RecommendedCalls, ct, nil, false)
+					p.Mutate(rs, prog.RecommendedCalls, ct, nil, prog.Syzkaller)
 					execute(pid, env, execOpts, p)
 				} else {
 					p = corpus[rnd.Intn(len(corpus))].Clone()
-					p.Mutate(rs, prog.RecommendedCalls, ct, nil, false)
+					p.Mutate(rs, prog.RecommendedCalls, ct, nil, prog.Syzkaller)
 					execute(pid, env, execOpts, p)
-					p.Mutate(rs, prog.RecommendedCalls, ct, nil, false)
+					p.Mutate(rs, prog.RecommendedCalls, ct, nil, prog.Syzkaller)
 					execute(pid, env, execOpts, p)
 				}
 			}

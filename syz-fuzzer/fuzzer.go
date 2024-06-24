@@ -430,6 +430,7 @@ func (fuzzer *Fuzzer) getBaseProgs() []*prog.Prog {
 	skipProgs := [...]string{
 		"18c4899a65ac0b81bd956430f8bb38be84473351",
 		"2d3fac57a37b051ce05427e4628b3746baf87e4a",
+		"2de0e0db8dd49e39472ce9a3f13c9f448d342a33",
 	}
 
 	fuzzer.corpusMu.RLock()
@@ -468,7 +469,7 @@ func (fuzzer *Fuzzer) getBaseProgs() []*prog.Prog {
 		return hash.String(progs[i].Serialize()) < hash.String(progs[j].Serialize())
 	})
 
-	return progs[160:]
+	return progs
 }
 
 func (fuzzer *Fuzzer) poll(needCandidates bool, stats map[string]uint64) bool {
