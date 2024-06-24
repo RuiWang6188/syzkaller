@@ -63,10 +63,28 @@ func newProc(fuzzer *Fuzzer, pid int) (*Proc, error) {
 }
 
 func (proc *Proc) loop() {
+	skipProgs := [...]string{
+		"18c4899a65ac0b81bd956430f8bb38be84473351",
+		"2d3fac57a37b051ce05427e4628b3746baf87e4a",
+		"2de0e0db8dd49e39472ce9a3f13c9f448d342a33",
+	}
 	log.Logf(0, "[proc loop] fuzzer corpus size: %v", len(proc.fuzzer.corpus))
 	totalCorpus := len(proc.fuzzer.corpus)
 	for i := 0; i < totalCorpus; i++ {
 		p := proc.fuzzer.corpus[i]
+
+		skipFlag := false
+		for _, skipProg := range skipProgs {
+			if hash.String(p.Serialize()) == skipProg {
+				log.Logf(0, "skip program: %v", skipProg)
+				skipFlag = true
+				break
+			}
+		}
+
+		if skipFlag {
+			continue
+		}
 
 		progCoverHistory := make([][]uint32, 0)
 
