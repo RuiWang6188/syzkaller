@@ -454,11 +454,18 @@ func (fuzzer *Fuzzer) getBaseProgs() []*prog.Prog {
 			continue
 		}
 
+		skipFlag := false
+
 		for _, sp := range skipProgs {
 			if sp == progHash {
 				log.Logf(0, "skip prog %v", progHash)
-				continue
+				skipFlag = true
+				break
 			}
+		}
+
+		if skipFlag {
+			continue
 		}
 
 		progs = append(progs, p)

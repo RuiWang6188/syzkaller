@@ -117,7 +117,7 @@ func (proc *Proc) loop() {
 		log.Logf(0, "coverCounter: %v", coverCounter)
 		for j := 0; j < 10; j++ {
 			var mutatedProgs []*prog.Prog
-			useML = false
+			// useML = false
 			if useML {
 				log.Logf(0, "use ML")
 				pe := p.Clone()

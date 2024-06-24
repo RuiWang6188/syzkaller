@@ -593,7 +593,7 @@ func (pool *ResourcePool) TakeOne() *int {
 
 func (mgr *Manager) preloadCorpus() {
 	log.Logf(0, "loading corpus...")
-	corpus_name := "corpus-1000-0.db"
+	corpus_name := "corpus-1000-1.db"
 	log.Logf(0, "loading corpus from %v", filepath.Join(mgr.cfg.Workdir, corpus_name))
 	corpusDB, err := db.Open(filepath.Join(mgr.cfg.Workdir, corpus_name), true)
 	if err != nil {
