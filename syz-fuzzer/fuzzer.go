@@ -456,7 +456,7 @@ func (fuzzer *Fuzzer) getBaseProgs() []*prog.Prog {
 		return hash.String(progs[i].Serialize()) < hash.String(progs[j].Serialize())
 	})
 
-	return progs
+	return progs[160:]
 }
 
 func (fuzzer *Fuzzer) poll(needCandidates bool, stats map[string]uint64) bool {

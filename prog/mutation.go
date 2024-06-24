@@ -77,7 +77,7 @@ func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, noMutate map[
 	mutatedProgs := make([]*Prog, 0)
 	for stop, ok := false, false; !stop; stop = ok && len(p.Calls) != 0 {
 		if !useML {
-			mutatedProgs, ok = ctx.mutateArgSyz()
+			mutatedProgs, ok = ctx.mutateArgSyzM()
 		} else {
 			mutatedProgs, ok = ctx.mutateArg()
 
@@ -451,6 +451,90 @@ func (ctx *mutator) mutateArgSyz() ([]*Prog, bool) {
 			p.Target.assignSizesCall(c)
 		}
 		mutatedProgs = append(mutatedProgs, p.Clone())
+	}
+	return mutatedProgs, true
+}
+
+func (ctx *mutator) mutateArgSyzM() ([]*Prog, bool) {
+	log.Logf(0, "mutateArgSyzM()")
+	p, r := ctx.p, ctx.r
+	if len(p.Calls) == 0 {
+		return nil, false
+	}
+
+	callIdx := chooseCall(p, r)
+	if callIdx < 0 {
+		return nil, false
+	}
+	c := p.Calls[callIdx]
+	if ctx.noMutate[c.Meta.ID] {
+		return nil, false
+	}
+	log.Logf(0, "mutate call index: %v", callIdx)
+	log.Logf(0, "mutate call: %v", c.Meta.Name)
+
+	ma := &mutationArgs{target: p.Target}
+	ForeachArg(c, ma.collectArg)
+	if len(ma.args) == 0 {
+		return nil, false
+	}
+
+	mutatedProgs := make([]*Prog, 0)
+	var goal float64
+
+	for stop, ok := false, false; !stop; stop = ok {
+		cp := p.Clone()
+		cp_c := cp.Calls[callIdx]
+		ok = true
+		updateSizes := true
+		ma := &mutationArgs{target: cp.Target}
+		ForeachArg(cp_c, ma.collectArg)
+		if len(ma.args) == 0 {
+			return nil, false
+		}
+		s := analyze(ctx.ct, ctx.corpus, cp, cp_c)
+		goal = ma.prioSum * r.Float64()
+		arg, argCtx := ma.chooseArgM(goal)
+		_, ok1 := cp.Target.mutateArg(r, s, arg, argCtx, &updateSizes)
+		if !ok1 {
+			log.Logf(0, "Target.mutateArg failed")
+			ok = false
+			continue
+		}
+	}
+
+	for len(mutatedProgs) < 30 {
+		cp := p.Clone()
+		idx := callIdx
+		cp_c := cp.Calls[idx]
+		ma := &mutationArgs{target: p.Target}
+		ForeachArg(cp_c, ma.collectArg)
+		if len(ma.args) == 0 {
+			return nil, false
+		}
+		updateSizes := true
+		s := analyze(ctx.ct, ctx.corpus, cp, cp_c)
+		arg, argCtx := ma.chooseArgM(goal)
+
+		calls, ok := cp.Target.mutateArg(r, s, arg, argCtx, &updateSizes)
+		if !ok {
+			log.Logf(0, "ERROR: Target.mutateArg failed")
+			continue
+		}
+		cp.insertBefore(cp_c, calls)
+		idx += len(calls)
+		for len(cp.Calls) > ctx.ncalls {
+			idx--
+			cp.RemoveCall(idx)
+		}
+		if idx < 0 || idx >= len(cp.Calls) || cp.Calls[idx] != cp_c {
+			panic(fmt.Sprintf("wrong call index: idx=%v calls=%v p.Calls=%v ncalls=%v",
+				idx, len(calls), len(cp.Calls), ctx.ncalls))
+		}
+		if updateSizes {
+			cp.Target.assignSizesCall(cp_c)
+		}
+		mutatedProgs = append(mutatedProgs, cp)
 	}
 	return mutatedProgs, true
 }
@@ -896,6 +980,16 @@ func (ma *mutationArgs) collectArg(arg Arg, ctx *ArgCtx) {
 	}
 	ma.prioSum += prio
 	ma.args = append(ma.args, mutationArg{arg, *ctx, ma.prioSum})
+}
+
+func (ma *mutationArgs) chooseArgM(goal float64) (Arg, ArgCtx) {
+	chosenIdx := sort.Search(len(ma.args), func(i int) bool { return ma.args[i].priority >= goal })
+	arg := ma.args[chosenIdx]
+
+	log.Logf(0, "goal: %v, chosenIdx: %v, prioSum: %v", goal, chosenIdx, ma.prioSum)
+	log.Logf(0, "chosen arg: %v", arg.arg.Type().Name())
+	return arg.arg, arg.ctx
+
 }
 
 func (ma *mutationArgs) chooseArg(r *rand.Rand) (Arg, ArgCtx) {

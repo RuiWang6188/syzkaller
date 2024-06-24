@@ -74,7 +74,7 @@ func (proc *Proc) loop() {
 			log.Logf(0, "prog %v, mutation index: %v", i, j)
 			pe := p.Clone()
 
-			accuracy := 1.0
+			accuracy := 0.0
 			log.Logf(0, "accuracy: %v", accuracy)
 
 			useML := false
@@ -114,10 +114,11 @@ func (proc *Proc) loop() {
 func (proc *Proc) executeAndCollectCoverage(p *prog.Prog) ([]uint32, error) {
 	log.Logf(0, "executeAndCollectCoverage: %v", hash.String(p.Serialize()))
 	initial_info := proc.executeRaw(proc.execOpts, p, StatTriage)
-	log.Logf(0, "executeAndCollectCoverage: initial_info: %v", initial_info)
+	// log.Logf(0, "executeAndCollectCoverage: initial_info: %v", initial_info)
 	if initial_info == nil {
 		return []uint32{}, fmt.Errorf("initial_info is nil")
 	}
+	log.Logf(0, "executeAndCollectCoverage::executeRaw() is completed")
 	calls, extra := proc.fuzzer.checkNewSignal(p, initial_info)
 
 	log.Logf(0, "executeAndCollectCoverage: calls=%v, extra=%v", calls, extra)
