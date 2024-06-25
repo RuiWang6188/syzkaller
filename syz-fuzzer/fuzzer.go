@@ -431,6 +431,8 @@ func (fuzzer *Fuzzer) getBaseProgs() []*prog.Prog {
 		"18c4899a65ac0b81bd956430f8bb38be84473351",
 		"2d3fac57a37b051ce05427e4628b3746baf87e4a",
 		"2de0e0db8dd49e39472ce9a3f13c9f448d342a33",
+		"05425c30e0f4fae59e66deef9b31d43365fa22bf",
+		"05646db5428e8612e953c625f48157b5a80b3011",
 	}
 
 	fuzzer.corpusMu.RLock()
@@ -454,11 +456,17 @@ func (fuzzer *Fuzzer) getBaseProgs() []*prog.Prog {
 			continue
 		}
 
+		skipFlag := false
 		for _, sp := range skipProgs {
 			if sp == progHash {
 				log.Logf(0, "skip prog %v", progHash)
-				continue
+				skipFlag = true
+				break
 			}
+		}
+
+		if skipFlag {
+			continue
 		}
 
 		progs = append(progs, p)
