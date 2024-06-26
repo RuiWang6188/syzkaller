@@ -431,6 +431,11 @@ func (fuzzer *Fuzzer) getBaseProgs() []*prog.Prog {
 		"18c4899a65ac0b81bd956430f8bb38be84473351",
 		"2d3fac57a37b051ce05427e4628b3746baf87e4a",
 		"2de0e0db8dd49e39472ce9a3f13c9f448d342a33",
+		"02253a3821eb66408d7de354f43a67f19f62f1d7",
+		"05646db5428e8612e953c625f48157b5a80b3011",
+		"05425c30e0f4fae59e66deef9b31d43365fa22bf",
+		"08ceb49004225482e7ae6e8881433a99afec4aa6",
+		"0795884078cb3eac4b0b17ca7d91a74bbae9b38f",
 	}
 
 	fuzzer.corpusMu.RLock()
@@ -476,7 +481,7 @@ func (fuzzer *Fuzzer) getBaseProgs() []*prog.Prog {
 		return hash.String(progs[i].Serialize()) < hash.String(progs[j].Serialize())
 	})
 
-	return progs
+	return progs[27:]
 }
 
 func (fuzzer *Fuzzer) poll(needCandidates bool, stats map[string]uint64) bool {

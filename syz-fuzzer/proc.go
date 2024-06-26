@@ -97,27 +97,26 @@ func (proc *Proc) loop() {
 		log.Logf(0, "len(progCoverHistory): %v", len(progCoverHistory))
 		var aggCover cover.Cover
 		coverCounter := make(map[int]int)
-		useML := true
+		useML := false
 		for idx, cover := range progCoverHistory {
 			aggCover.Merge(cover)
 
-			// double check: collect the last 200 coverages
+			// double check: collect the last 100 coverages
 			if idx >= len(progCoverHistory)-100 {
 				coverCounter[len(cover)]++
-				if idx == len(progCoverHistory)-1 {
-					continue
-				}
-				// if the current coverage is not the same as the next one, then we won't use the ML
-				if len(cover) != len(progCoverHistory[idx+1]) {
-					useML = false
-				}
 			}
 		}
 
-		log.Logf(0, "coverCounter: %v", coverCounter)
+		for k, v := range coverCounter {
+			log.Logf(0, "coverage length: %v, count: %v", k, v)
+			if v > 0.8*100 {
+				useML = true
+			}
+		}
+
+		useML = false
 		for j := 0; j < 10; j++ {
 			var mutatedProgs []*prog.Prog
-			// useML = false
 			if useML {
 				log.Logf(0, "use ML")
 				pe := p.Clone()
