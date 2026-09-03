@@ -46,6 +46,28 @@ var cmdlineRe = regexp.MustCompile(`(?m)^CONFIG_CMDLINE="(.*)"$`)
 // directory, so a 1h limit means the build can never complete.
 const kernelBuildTimeout = 6 * time.Hour
 
+// LinuxMakeArgs passes KERNELVERSION=syzkaller and KERNELRELEASE=syzkaller for reproducible
+// builds, which makes the kernel report a non-numeric /proc/sys/kernel/osrelease. syz-executor
+// is linked -static-pie (sys/targets: linux/amd64), and glibc's _dl_discover_osversion only
+// consults the vDSO ABI note when SHARED is defined -- a static binary reads
+// /proc/sys/kernel/osrelease instead, fails to parse "syzkaller", and aborts at startup with
+// "FATAL: kernel too old". Nothing runs in the VM, and the failure surfaces only as
+// crash.Reproduce's "no output from test machine", which reads like a broken VM.
+//
+// Verified by running a plain -static-pie hello world in the guest: same abort; the dynamically
+// linked build of the same source runs fine. Dropping the two overrides leaves LOCALVERSION,
+// so the release becomes e.g. 7.2.0-syzkaller and parses.
+func keepNumericKernelRelease(args []string) []string {
+	out := args[:0:0]
+	for _, arg := range args {
+		if arg == "KERNELVERSION=syzkaller" || arg == "KERNELRELEASE=syzkaller" {
+			continue
+		}
+		out = append(out, arg)
+	}
+	return out
+}
+
 func BuildKernel(buildDir, srcDir, cfg, targetOS, targetArch string, cleanup bool) error {
 	if err := osutil.WriteFile(filepath.Join(buildDir, ".config"), []byte(cfg)); err != nil {
 		return err
@@ -75,6 +97,7 @@ func BuildKernel(buildDir, srcDir, cfg, targetOS, targetArch string, cleanup boo
 	image := filepath.FromSlash(build.LinuxKernelImage(targetArch))
 	makeArgs := build.LinuxMakeArgs(target, targets.DefaultLLVMCompiler, targets.DefaultLLVMLinker,
 		"ccache", buildDir, runtime.NumCPU())
+	makeArgs = keepNumericKernelRelease(makeArgs)
 	const compileCommands = "compile_commands.json"
 	makeArgs = append(makeArgs, "-s", path.Base(image), compileCommands)
 	if _, err := osutil.RunCmd(kernelBuildTimeout, srcDir, "make", makeArgs...); err != nil {
