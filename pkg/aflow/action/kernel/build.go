@@ -40,6 +40,12 @@ type buildResult struct {
 
 var cmdlineRe = regexp.MustCompile(`(?m)^CONFIG_CMDLINE="(.*)"$`)
 
+// The upstream 1h limit assumes the build owns a full multi-core machine.
+// On a shared host with the build pinned to a few cores, a syzbot config
+// takes several hours with clang, and the cache discards a timed-out
+// directory, so a 1h limit means the build can never complete.
+const kernelBuildTimeout = 6 * time.Hour
+
 func BuildKernel(buildDir, srcDir, cfg, targetOS, targetArch string, cleanup bool) error {
 	if err := osutil.WriteFile(filepath.Join(buildDir, ".config"), []byte(cfg)); err != nil {
 		return err
@@ -71,7 +77,7 @@ func BuildKernel(buildDir, srcDir, cfg, targetOS, targetArch string, cleanup boo
 		"ccache", buildDir, runtime.NumCPU())
 	const compileCommands = "compile_commands.json"
 	makeArgs = append(makeArgs, "-s", path.Base(image), compileCommands)
-	if _, err := osutil.RunCmd(time.Hour, srcDir, "make", makeArgs...); err != nil {
+	if _, err := osutil.RunCmd(kernelBuildTimeout, srcDir, "make", makeArgs...); err != nil {
 		buildErr := build.ExtractRootCause(err, targets.Linux, srcDir)
 		if buildErr == err {
 			return aflow.FlowError(err)
