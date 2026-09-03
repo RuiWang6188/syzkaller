@@ -74,6 +74,16 @@ func BuildKernel(buildDir, srcDir, cfg, targetOS, targetArch string, cleanup boo
 	}
 	configScript := filepath.Join(srcDir, "scripts", "config")
 	configArgs := []string{"--set-str", "INITRAMFS_SOURCE", ""}
+	// Module CRCs are computed either by scripts/gendwarfksyms, which links the host's
+	// libdw and parses the DWARF the kernel build just emitted, or by scripts/genksyms,
+	// which parses preprocessed C and needs nothing from the host. The former is the
+	// default and it is fragile: on a syzbot config with CONFIG_AUTOFDO_CLANG=y, clang's
+	// line tables defeat elfutils 0.186 and 0.188 alike and every exported symbol fails
+	// with "dwarf_getsrcfiles failed: 'invalid .debug_line section'", so the whole build
+	// dies. Which CRC generator runs has no effect on the built kernel's behaviour --
+	// nothing loads out-of-tree modules into a syzkaller image -- so prefer the one with
+	// no host dependency, in the same spirit as the X86_X32_ABI line below.
+	configArgs = append(configArgs, "-d", "GENDWARFKSYMS", "-e", "GENKSYMS")
 	switch targetArch {
 	case targets.AMD64:
 		// We don't fuzz x32 arch, and it's not very interesting,
