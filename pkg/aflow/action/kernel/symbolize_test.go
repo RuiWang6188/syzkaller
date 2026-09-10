@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/google/syzkaller/pkg/cover/backend"
 	"github.com/google/syzkaller/pkg/symbolizer"
 	"github.com/google/syzkaller/sys/targets"
 	"github.com/stretchr/testify/require"
@@ -247,5 +248,43 @@ func TestSymbolizePC(t *testing.T) {
 				require.Equal(t, tt.wantRes, res)
 			}
 		})
+	}
+}
+
+func TestKernelDirsFor(t *testing.T) {
+	const id = "3cfceb10090214b4fe2231e0d3ae8aa37f3d0782"
+	src := "/work/camp-w10/cache/src/" + id
+	obj := "/work/gate-w0/cache/build/1233aa80e3de1f6904758e9534b7eb64ab5f9680"
+	built := "/work/gate-w0/cache/src/" + id
+	frames := []symbolizer.Frame{
+		{File: built + "/drivers/media/usb/dvb-usb/vp702x.c", Line: 10},
+		{File: built + "/include/linux/usb.h", Line: 20},
+	}
+	dirs := KernelDirsFor(frames, src, obj)
+	if dirs.Src != src || dirs.Obj != obj {
+		t.Fatalf("Src/Obj changed: %+v", dirs)
+	}
+	if dirs.BuildSrc != built {
+		t.Fatalf("BuildSrc = %q, want %q", dirs.BuildSrc, built)
+	}
+	rel, abs := backend.CleanPath(frames[0].File, dirs, nil)
+	if rel != "drivers/media/usb/dvb-usb/vp702x.c" {
+		t.Fatalf("rel = %q", rel)
+	}
+	if abs != src+"/drivers/media/usb/dvb-usb/vp702x.c" {
+		t.Fatalf("abs = %q", abs)
+	}
+	// Built from kernelSrc itself: nothing to infer, CleanPath's Src case applies as before.
+	same := []symbolizer.Frame{{File: src + "/fs/ext4/inode.c"}}
+	if d := KernelDirsFor(same, src, obj); d.BuildSrc != "" {
+		t.Fatalf("BuildSrc inferred needlessly: %q", d.BuildSrc)
+	}
+	if rel, _ := backend.CleanPath(same[0].File, KernelDirsFor(same, src, obj), nil); rel != "fs/ext4/inode.c" {
+		t.Fatalf("rel = %q", rel)
+	}
+	// A different cache id is not ours to strip.
+	other := []symbolizer.Frame{{File: "/work/gate-w0/cache/src/0000000000000000000000000000000000000000/fs/x.c"}}
+	if d := KernelDirsFor(other, src, obj); d.BuildSrc != "" {
+		t.Fatalf("BuildSrc from a foreign entry: %q", d.BuildSrc)
 	}
 }

@@ -82,10 +82,7 @@ func symbolizePC(ctx *aflow.Context, args symbolizePCArgs) (symbolizePCResult, e
 	frame := frames[0]
 	topFrame := frames[len(frames)-1]
 
-	kernelDirs := &mgrconfig.KernelDirs{
-		Src: args.KernelSrc,
-		Obj: args.KernelObj,
-	}
+	kernelDirs := KernelDirsFor(frames, args.KernelSrc, args.KernelObj)
 
 	// Convert absolute path to relative path from the kernel source tree root.
 	file, _ := backend.CleanPath(frame.File, kernelDirs, nil)
@@ -110,4 +107,37 @@ func symbolizePC(ctx *aflow.Context, args symbolizePCArgs) (symbolizePCResult, e
 		OuterFunc: topFrame.Func,
 		Frames:    inlineFrames,
 	}, nil
+}
+
+// KernelDirsFor returns the kernel directories backend.CleanPath needs to turn the symbolizer's
+// absolute file names into paths relative to the source tree.
+//
+// The kernel is not necessarily built from kernelSrc itself: the source cache entry may have
+// been checked out (or hardlinked) into another workdir, and the kernel built from that copy,
+// so DWARF records e.g. /other/cache/src/<id>/fs/ext4/inode.c while kernelSrc is
+// /this/cache/src/<id>. Both copies share the cache id, so the build-time directory is
+// recoverable from the frames themselves: it is the prefix ending in cache/src/<id>. Without
+// it, CleanPath leaves the file names absolute, every tool that joins them onto kernelSrc
+// opens a path that does not exist, and per-file coverage lookups never match.
+func KernelDirsFor(frames []symbolizer.Frame, kernelSrc, kernelObj string) *mgrconfig.KernelDirs {
+	dirs := &mgrconfig.KernelDirs{Src: kernelSrc, Obj: kernelObj}
+	dirs.BuildSrc = inferBuildSrc(frames, kernelSrc)
+	return dirs
+}
+
+func inferBuildSrc(frames []symbolizer.Frame, kernelSrc string) string {
+	id := filepath.Base(filepath.Clean(kernelSrc))
+	if id == "" || id == "." || id == string(filepath.Separator) {
+		return ""
+	}
+	needle := string(filepath.Separator) + filepath.Join("cache", "src", id) + string(filepath.Separator)
+	for _, f := range frames {
+		if f.File == "" || !filepath.IsAbs(f.File) || strings.HasPrefix(f.File, kernelSrc) {
+			continue
+		}
+		if i := strings.Index(f.File, needle); i >= 0 {
+			return f.File[:i+len(needle)-1]
+		}
+	}
+	return ""
 }

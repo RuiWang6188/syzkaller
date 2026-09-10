@@ -14,11 +14,11 @@ import (
 	"slices"
 
 	"github.com/google/syzkaller/pkg/aflow"
+	"github.com/google/syzkaller/pkg/aflow/action/kernel"
 	"github.com/google/syzkaller/pkg/cover/backend"
 	"github.com/google/syzkaller/pkg/csource"
 	"github.com/google/syzkaller/pkg/hash"
 	"github.com/google/syzkaller/pkg/instance"
-	"github.com/google/syzkaller/pkg/mgrconfig"
 	"github.com/google/syzkaller/pkg/report"
 	"github.com/google/syzkaller/pkg/symbolizer"
 	"github.com/google/syzkaller/sys/targets"
@@ -340,10 +340,9 @@ func symbolize(args TargetConfig, coverage [][]uint64) ([][]symbolizer.Frame, er
 		return nil, err
 	}
 
-	kernelDirs := &mgrconfig.KernelDirs{
-		Src: args.KernelSrc,
-		Obj: args.KernelObj,
-	}
+	// The kernel may have been built from another workdir's copy of the same source cache entry;
+	// KernelDirsFor recovers that directory so CleanPath can strip it (see its comment).
+	kernelDirs := kernel.KernelDirsFor(frames, args.KernelSrc, args.KernelObj)
 	for _, frame := range frames {
 		relPath, _ := backend.CleanPath(frame.File, kernelDirs, nil)
 		frame.File = relPath
