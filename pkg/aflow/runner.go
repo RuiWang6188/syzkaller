@@ -169,7 +169,12 @@ func (rm *RunnerManager) Loop() error {
 			return nil
 		case <-egCtx.Done():
 			return egCtx.Err()
-		case <-time.After(5 * time.Minute):
+		case <-time.After(15 * time.Minute):
+			// recon: 15 minutes, not upstream's 5. Nothing restarts the pool after this
+			// fires: the manager's context is cancelled and every later Submit fails.
+			// On a host that is also indexing kernels for codesearch (one clang process
+			// per CPU per index) a VM boot took 4-6 minutes on 2026-09-10, so the pool
+			// was cancelled seconds before the executor would have connected.
 			return fmt.Errorf("timeout waiting for syz-executor to connect")
 		}
 	})
