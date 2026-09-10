@@ -274,6 +274,14 @@ func TestKernelDirsFor(t *testing.T) {
 	if abs != src+"/drivers/media/usb/dvb-usb/vp702x.c" {
 		t.Fatalf("abs = %q", abs)
 	}
+	// What DWARF actually records: a path relative to the build directory, not yet cleaned.
+	raw := []symbolizer.Frame{{File: "/work/gate-w0/cache/build/fa6faa102444/../../src/" + id + "/fs/ext4/inode.c"}}
+	if d := KernelDirsFor(raw, src, obj); d.BuildSrc != built {
+		t.Fatalf("BuildSrc from a compdir-relative name = %q, want %q", d.BuildSrc, built)
+	}
+	if rel, _ := backend.CleanPath(raw[0].File, KernelDirsFor(raw, src, obj), nil); rel != "fs/ext4/inode.c" {
+		t.Fatalf("rel = %q", rel)
+	}
 	// Built from kernelSrc itself: nothing to infer, CleanPath's Src case applies as before.
 	same := []symbolizer.Frame{{File: src + "/fs/ext4/inode.c"}}
 	if d := KernelDirsFor(same, src, obj); d.BuildSrc != "" {

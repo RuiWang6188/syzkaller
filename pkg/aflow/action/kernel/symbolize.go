@@ -132,11 +132,14 @@ func inferBuildSrc(frames []symbolizer.Frame, kernelSrc string) string {
 	}
 	needle := string(filepath.Separator) + filepath.Join("cache", "src", id) + string(filepath.Separator)
 	for _, f := range frames {
-		if f.File == "" || !filepath.IsAbs(f.File) || strings.HasPrefix(f.File, kernelSrc) {
+		// DWARF names are compdir-relative, e.g. <obj>/../../src/<id>/fs/x.c; Clean first,
+		// as CleanPath itself does, so the cache/src/<id> segment is visible.
+		file := filepath.Clean(f.File)
+		if f.File == "" || !filepath.IsAbs(file) || strings.HasPrefix(file, kernelSrc) {
 			continue
 		}
-		if i := strings.Index(f.File, needle); i >= 0 {
-			return f.File[:i+len(needle)-1]
+		if i := strings.Index(file, needle); i >= 0 {
+			return file[:i+len(needle)-1]
 		}
 	}
 	return ""
