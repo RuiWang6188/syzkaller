@@ -106,6 +106,7 @@ func ExecuteSeedFunc(ctx *aflow.Context, args ExecuteSeedArgs) (string, error) {
 				// report is the result, not the transport error
 				if crashes := rm.RecentCrashes(); len(crashes) > before {
 					res.BugTitle = crashes[before].Title
+					res.AltTitles = crashes[before].AltTitles
 					res.Report = string(crashes[before].Report)
 					return res, nil
 				}
@@ -120,6 +121,7 @@ func ExecuteSeedFunc(ctx *aflow.Context, args ExecuteSeedArgs) (string, error) {
 			crashes = crashes[before:]
 			if len(crashes) > 0 {
 				res.BugTitle = crashes[0].Title
+				res.AltTitles = crashes[0].AltTitles
 				res.Report = string(crashes[0].Report)
 				for _, rep := range crashes[1:] {
 					res.OtherReports = append(res.OtherReports, string(rep.Report))
@@ -127,6 +129,7 @@ func ExecuteSeedFunc(ctx *aflow.Context, args ExecuteSeedArgs) (string, error) {
 			}
 		} else if len(crashes) > 0 {
 			res.BugTitle = crashes[0].Title
+			res.AltTitles = crashes[0].AltTitles
 			res.Report = fmt.Sprintf("The kernel crashed after one of the previous executions:\n%s", string(crashes[0].Report))
 			for _, rep := range crashes[1:] {
 				res.OtherReports = append(res.OtherReports, string(rep.Report))
@@ -165,12 +168,13 @@ func ExecuteSeedFunc(ctx *aflow.Context, args ExecuteSeedArgs) (string, error) {
 // LoadCrash returns the crash a cached execution recorded and its report. With recon-exec
 // semantics (ExecuteSeedArgs.CrashIsResult) that is the crash this program triggered; an
 // empty title means it ran without crashing.
-func LoadCrash(ctx *aflow.Context, cachedID string) (string, string, error) {
+// LoadCrash returns the crash's identity under syzkaller's rule (titles.go) and its report.
+func LoadCrash(ctx *aflow.Context, cachedID string) (TitleSet, string, error) {
 	cached, err := aflow.RetrieveObject[cachedExecution](ctx, cachedID)
 	if err != nil {
-		return "", "", err
+		return TitleSet{}, "", err
 	}
-	return cached.BugTitle, cached.Report, nil
+	return TitleSet{Title: cached.BugTitle, AltTitles: cached.AltTitles}, cached.Report, nil
 }
 
 func extractCallErrors(info *flatrpc.ProgInfo, calls []*prog.Call) []CallError {

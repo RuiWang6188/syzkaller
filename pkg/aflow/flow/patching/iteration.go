@@ -108,6 +108,8 @@ func init() {
 				kernel.Checkout,
 				kernel.Build,
 				crash.Reproduce,
+				// This flow shows the crash to an agent; it does not judge bug identity.
+				crash.ActionIgnoreAltTitles,
 				codesearcher.PrepareIndex,
 				extractNewComments,
 				extractLatestPatchInfo,

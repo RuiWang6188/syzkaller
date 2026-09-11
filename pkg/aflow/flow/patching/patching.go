@@ -74,6 +74,8 @@ func init() {
 				kernel.Build,
 				// Ensure we can reproduce the crash (and the build boots).
 				crash.Reproduce,
+				// This flow shows the crash to an agent; it does not judge bug identity.
+				crash.ActionIgnoreAltTitles,
 				codesearcher.PrepareIndex,
 				&aflow.LLMAgent{
 					Name:        "debugger",

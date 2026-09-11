@@ -40,6 +40,7 @@ type ReproduceArgs struct {
 
 type reproduceResult struct {
 	ReproducedBugTitle       string
+	ReproducedAltTitles      []string
 	ReproducedCrashReport    string
 	OtherCrashReports        []string
 	ReproducedFaultInjection string
@@ -214,7 +215,10 @@ type CallError struct {
 }
 
 type cachedExecution struct {
-	BugTitle       string
+	BugTitle string
+	// Alternative titles pkg/report derived for the same crash. Together with BugTitle they
+	// are the crash's identity under syzkaller's own rule; see titles.go.
+	AltTitles      []string
 	Report         string
 	OtherReports   []string
 	FaultInjection string
@@ -267,6 +271,9 @@ func ReproduceFuncWithCoverage(ctx *aflow.Context, args ReproduceArgs,
 		args.Type, hash.String(args.VM), hash.String(args.ReproC),
 		hash.String(args.ReproSyz), hash.String(args.ReproOpts), collectCoverage)
 
+	// The description is deliberately NOT versioned for the AltTitles field: an object written
+	// before it simply unmarshals with an empty set, and SameBug then compares representative
+	// titles, which is what it did before. Bumping would invalidate every cached execution.
 	cached, cachedID, err := aflow.CacheObject(ctx, "repro", desc, func() (cachedExecution, error) {
 		var res cachedExecution
 		workdir, err := ctx.TempDir()
@@ -276,6 +283,7 @@ func ReproduceFuncWithCoverage(ctx *aflow.Context, args ReproduceArgs,
 		testRes, err := RunTest(ctx, args, workdir, collectCoverage)
 		if testRes.Report != nil {
 			res.BugTitle = testRes.Report.Title
+			res.AltTitles = testRes.Report.AltTitles
 			res.Report = string(testRes.Report.Report)
 		}
 		for _, rep := range testRes.OtherReports {
@@ -297,6 +305,7 @@ func ReproduceFuncWithCoverage(ctx *aflow.Context, args ReproduceArgs,
 	}
 	return reproduceResult{
 		ReproducedBugTitle:       cached.BugTitle,
+		ReproducedAltTitles:      cached.AltTitles,
 		ReproducedCrashReport:    cached.Report,
 		OtherCrashReports:        cached.OtherReports,
 		ReproducedFaultInjection: cached.FaultInjection,

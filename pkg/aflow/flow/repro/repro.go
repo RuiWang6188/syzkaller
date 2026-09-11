@@ -56,6 +56,7 @@ func init() {
 				kernel.Build,
 				codesearcher.PrepareIndex,
 				actionsyzlang.PrepareSyzFS,
+				crash.ActionBugTitles,
 				&aflow.LLMAgent{
 					Name:    "crash-repro-finder",
 					Model:   aflow.DeepReasoningModel,
@@ -75,13 +76,23 @@ func init() {
 				crash.Reproduce,
 				aflow.NewFuncAction("compare", func(ctx *aflow.Context,
 					args struct {
-						BugTitle           string
-						ReproducedBugTitle string
+						BugTitle            string
+						BugAltTitles        []string
+						ReproducedBugTitle  string
+						ReproducedAltTitles []string
 						// This is an unused output of crash.Reproduce.
 						// TODO: figure out how to handle such outputs better.
 						ReproducedFaultInjection string
 					}) (struct{ Reproduced bool }, error) {
-					return struct{ Reproduced bool }{args.BugTitle == args.ReproducedBugTitle}, nil
+					// Two crashes are the same bug when their Title/AltTitles sets intersect
+					// (pkg/report/report.go:47), which is the rule the dashboard applies in
+					// findBugForCrash. Comparing the representative titles alone rejects a
+					// reproducer whenever the guilty frame, the sanitizer, or syzkaller's own
+					// frame skip-list has moved since the bug was filed.
+					return struct{ Reproduced bool }{crash.SameBug(
+						crash.ExpectedSet(args.BugTitle, args.BugAltTitles),
+						crash.TitleSet{Title: args.ReproducedBugTitle, AltTitles: args.ReproducedAltTitles},
+					)}, nil
 				}),
 			),
 		},
