@@ -27,6 +27,12 @@ type ExecuteSeedArgs struct {
 	// accumulates for the life of the RunnerManager), and only crashes that appear during
 	// THIS submit are attributed to the program.
 	CrashIsResult bool
+	// Parse the program leniently. syzbot's reproducers are written against the syzkaller
+	// descriptions of their day: a struct that has since grown a field makes the strict parse
+	// reject the whole program ("missing struct fs_opt_elem[btrfs_options] fields 1/2"), even
+	// though syz-execprog in the VM runs it fine. Only for programs that come from outside;
+	// an agent's own program must stay strict, or it never learns that it wrote nonsense.
+	Lenient bool
 }
 
 const deserializationErrorHelp = `
@@ -51,7 +57,11 @@ func ExecuteSeedFunc(ctx *aflow.Context, args ExecuteSeedArgs) (string, error) {
 
 	fullSyz := ctx.RestoreBlobs(args.ReproSyz)
 	// We perform normalization so that the cache key is calculated correctly.
-	p, err := target.Deserialize([]byte(fullSyz), prog.Strict)
+	mode := prog.Strict
+	if args.Lenient {
+		mode = prog.NonStrict
+	}
+	p, err := target.Deserialize([]byte(fullSyz), mode)
 	if err != nil {
 		return "", aflow.BadCallError("%v%s", ctx.ReplaceBlobs(err.Error()), deserializationErrorHelp)
 	}
