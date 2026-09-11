@@ -5,6 +5,7 @@ package crash
 
 import (
 	"encoding/json"
+	"errors"
 	"regexp"
 	"slices"
 	"strings"
@@ -39,6 +40,13 @@ import (
 // A kernel crash report never carries one, so it is stripped before comparing. Crash-side titles
 // are unaffected; only a title taken from the dashboard can have it.
 var dashboardCounter = regexp.MustCompile(`\s*\(\d+\)$`)
+
+// Both narrow the expected set to the declared title alone, which silently turns the rule back
+// into a string comparison. They are errors so that the one caller logs them; neither is fatal.
+var (
+	errNoReport       = errors.New("no crash report to derive alternative titles from")
+	errUnparsedReport = errors.New("the bug's own crash report did not parse")
+)
 
 // NormalizeTitle prepares a title for comparison. Deliberately minimal: anything beyond
 // trimming and dropping the dashboard counter would be a similarity heuristic of our own, and
@@ -98,7 +106,7 @@ func SameBug(a, b TitleSet) bool {
 func ExpectedTitles(args TargetConfig, workdir, bugTitle, crashReport string) (TitleSet, error) {
 	bare := TitleSet{Title: bugTitle}
 	if strings.TrimSpace(crashReport) == "" {
-		return bare, nil
+		return bare, errNoReport
 	}
 	cfg, err := BuildConfig(args, workdir)
 	if err != nil {
@@ -109,7 +117,7 @@ func ExpectedTitles(args TargetConfig, workdir, bugTitle, crashReport string) (T
 		return bare, err
 	}
 	if set.Empty() {
-		return bare, nil
+		return bare, errUnparsedReport
 	}
 	// Keep the declared title in the set as well: it is the name the bug is known by, and the
 	// report we were given may be one crash of several the bug has produced.
@@ -185,7 +193,11 @@ var ActionBugTitles = aflow.NewFuncAction("bug-titles",
 			log.Logf(0, "bug-titles: falling back to the declared title alone: %v", err)
 			return BugTitlesResult{}, nil
 		}
-		return BugTitlesResult{BugAltTitles: set.AltTitles}, nil
+		// All(), not AltTitles: ExpectedSet reinstalls the declared title as the representative,
+		// so the title the reporter actually derived would otherwise be dropped. For a format
+		// with no alt templates -- plain "WARNING in f" has none -- that left the expected side
+		// as exactly {declared title}, which is the comparison this change exists to replace.
+		return BugTitlesResult{BugAltTitles: set.All()}, nil
 	})
 
 // ExpectedSet rebuilds the expected side from the two flow variables ActionBugTitles produces.

@@ -5,6 +5,7 @@ package crash
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -112,5 +113,48 @@ func TestExpectedSetKeepsDeclaredTitle(t *testing.T) {
 	}
 	if !SameBug(set, TitleSet{Title: "UBSAN: array-index-out-of-bounds in foo", AltTitles: []string{"bad-access in foo"}}) {
 		t.Error("an alternative title must also match")
+	}
+}
+
+// The bug this guards against: ActionBugTitles returned set.AltTitles while ExpectedSet
+// reinstalls the declared title as the representative, so the title the reporter derived was
+// dropped. For a format with no alternatives -- plain "WARNING in f" has none -- the expected
+// side collapsed to exactly {declared title}, which is the string comparison the rule replaces.
+func TestBugTitlesRoundTripKeepsTheDerivedTitle(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		declared string
+		derived  TitleSet
+	}{{
+		name:     "alt-less format whose derived title names another frame",
+		declared: "WARNING in kvm_gpc_check",
+		derived:  TitleSet{Title: "WARNING in __kvm_gpc_refresh"},
+	}, {
+		name:     "derived title agrees with the declared one",
+		declared: "KASAN: use-after-free Read in foo",
+		derived:  TitleSet{Title: "KASAN: use-after-free Read in foo", AltTitles: []string{"bad-access in foo"}},
+	}, {
+		name:     "declared title carries a dashboard counter",
+		declared: "WARNING in f (3)",
+		derived:  TitleSet{Title: "WARNING in g"},
+	}} {
+		t.Run(test.name, func(t *testing.T) {
+			// What ExpectedTitles builds, then what ActionBugTitles carries out of the flow,
+			// then what the comparison sites rebuild.
+			full := test.derived
+			if NormalizeTitle(test.declared) != "" && !slices.Contains(full.All(), NormalizeTitle(test.declared)) {
+				full.AltTitles = append(full.AltTitles, test.declared)
+			}
+			roundTripped := ExpectedSet(test.declared, full.All())
+			// A crash parsed by the same reporter yields the derived set; it must still match.
+			if !SameBug(roundTripped, test.derived) {
+				t.Errorf("the derived title did not survive the round trip:\n  carried  %q\n  crash    %q",
+					roundTripped.All(), test.derived.All())
+			}
+			// And the declared title must not be lost either.
+			if !SameBug(roundTripped, TitleSet{Title: test.declared}) {
+				t.Errorf("the declared title did not survive the round trip: %q", roundTripped.All())
+			}
+		})
 	}
 }

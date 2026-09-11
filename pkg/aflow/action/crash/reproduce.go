@@ -149,11 +149,23 @@ func aggregateTestResults(validResults []instance.EnvTestResult,
 		}
 
 		if crashErr, ok := errors.AsType[*instance.CrashError](result.Error); ok {
-			title := crashErr.Report.Title
-			if stat, ok := crashes[title]; ok {
+			// Bucket by the same-bug rule, not by the title string. Three runs of one flaky bug
+			// can be titled three ways -- a sanitizer rewording, a different sanitizer firing
+			// first, a frame that inlined differently -- and bucketing by string splits them
+			// 1/1/1, at which point an unrelated crash can win the modal vote outright. Group
+			// them and the modal title is the modal *bug* (titles.go).
+			got := TitleSetOf(crashErr.Report)
+			key := crashErr.Report.Title
+			for k, stat := range crashes {
+				if SameBug(got, TitleSetOf(stat.report)) {
+					key = k
+					break
+				}
+			}
+			if stat, ok := crashes[key]; ok {
 				stat.count++
 			} else {
-				crashes[title] = &crashStat{report: crashErr.Report, count: 1}
+				crashes[key] = &crashStat{report: crashErr.Report, count: 1}
 				if res.FaultInjection == "" {
 					fi, _ := crashReporter.ExtractFaultInjectionInfo(result.RawOutput)
 					res.FaultInjection = fi
@@ -265,15 +277,19 @@ func ReproduceFuncWithCoverage(ctx *aflow.Context, args ReproduceArgs,
 	if err != nil {
 		return reproduceResult{}, "", err
 	}
+	// version 8: the object gained AltTitles. Not versioning it looked cheaper -- an old object
+	// unmarshals with an empty set and SameBug falls back to comparing representative titles --
+	// but that is not the old behaviour: it compares a WIDENED expected set against a TRUNCATED
+	// actual one, so the same program on the same kernel gets opposite verdicts depending on
+	// whether the execution came from the cache or ran cold. Worse, the bias is per-arm: a newly
+	// added action is always cold while the existing arms have hundreds of warm objects, which is
+	// exactly the asymmetry this work exists to remove.
 	desc := fmt.Sprintf("kernel commit %v, kernel config hash %v, image hash %v,"+
-		" vm %v, vm config hash %v, C repro hash %v, syz repro hash %v, opts hash %v, cov %v, version 7",
+		" vm %v, vm config hash %v, C repro hash %v, syz repro hash %v, opts hash %v, cov %v, version 8",
 		args.KernelCommit, hash.String(args.KernelConfig), hash.String(imageData),
 		args.Type, hash.String(args.VM), hash.String(args.ReproC),
 		hash.String(args.ReproSyz), hash.String(args.ReproOpts), collectCoverage)
 
-	// The description is deliberately NOT versioned for the AltTitles field: an object written
-	// before it simply unmarshals with an empty set, and SameBug then compares representative
-	// titles, which is what it did before. Bumping would invalidate every cached execution.
 	cached, cachedID, err := aflow.CacheObject(ctx, "repro", desc, func() (cachedExecution, error) {
 		var res cachedExecution
 		workdir, err := ctx.TempDir()
