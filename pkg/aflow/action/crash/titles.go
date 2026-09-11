@@ -153,6 +153,15 @@ type BugTitlesArgs struct {
 	KernelConfig string
 	BugTitle     string
 	CrashReport  string
+	// Titles syzbot itself recorded under this bug id. The same notion as AltTitles, taken from
+	// the accumulation the dashboard actually performed -- it merges every accepted crash's set
+	// into the bug (dashboard/app/api.go:947) -- instead of re-derived from one report. It
+	// matters because re-deriving often yields nothing: 261 of 368 of this corpus's syzbot
+	// reports produce no alternative at all. Plain "WARNING in f" has no alt template, and a
+	// KASAN report whose first BUG line names an inlined frame parses corrupted (51 of 368, 42
+	// of them KASAN). Without this the expected side stays the bare declared title for most of
+	// the benchmark, which is the comparison the rule replaces.
+	BugKnownTitles []string
 }
 
 func (a BugTitlesArgs) targetConfig() TargetConfig {
@@ -188,11 +197,12 @@ var ActionBugTitles = aflow.NewFuncAction("bug-titles",
 		}
 		set, err := ExpectedTitles(args.targetConfig(), workdir, args.BugTitle, args.CrashReport)
 		if err != nil {
-			// A bug whose report we cannot parse still has its declared title; falling back to
-			// it keeps the flow running with the narrower set rather than failing the run.
-			log.Logf(0, "bug-titles: falling back to the declared title alone: %v", err)
-			return BugTitlesResult{}, nil
+			// A bug whose report yields nothing still has its declared title and whatever syzbot
+			// recorded. Narrower, but the flow runs.
+			log.Logf(0, "bug-titles: no alternatives from the report (%v)", err)
+			set = TitleSet{Title: args.BugTitle}
 		}
+		set.AltTitles = append(set.AltTitles, args.BugKnownTitles...)
 		// All(), not AltTitles: ExpectedSet reinstalls the declared title as the representative,
 		// so the title the reporter actually derived would otherwise be dropped. For a format
 		// with no alt templates -- plain "WARNING in f" has none -- that left the expected side

@@ -23,19 +23,22 @@ import (
 )
 
 type ReproInputs struct {
-	AgentName    string
-	TargetOS     string
-	TargetArch   string
-	BugTitle     string
-	CrashReport  string
-	KernelRepo   string
-	KernelCommit string
-	KernelConfig string
-	Image        string
-	Type         string
-	VM           json.RawMessage
-	Syzkaller    string
-	StraceBin    string
+	AgentName   string
+	TargetOS    string
+	TargetArch  string
+	BugTitle    string
+	CrashReport string
+	// Titles syzbot itself recorded under this bug id (crashes[].title from the dashboard's bug
+	// JSON). Merged into the expected side by crash.ActionBugTitles; optional.
+	BugKnownTitles []string `json:",omitempty"`
+	KernelRepo     string
+	KernelCommit   string
+	KernelConfig   string
+	Image          string
+	Type           string
+	VM             json.RawMessage
+	Syzkaller      string
+	StraceBin      string
 }
 
 func init() {
