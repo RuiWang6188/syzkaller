@@ -21,6 +21,12 @@ import (
 type ExecuteSeedArgs struct {
 	TargetConfig
 	ReproSyz string
+	// recon: a kernel crash is the result to record, not a failure of the execution. The
+	// execution is cached under its own kind ("recon-exec") so it never inherits a seed-exec
+	// record whose BugTitle was the crash of an EARLIER program of that run (RecentCrashes
+	// accumulates for the life of the RunnerManager), and only crashes that appear during
+	// THIS submit are attributed to the program.
+	CrashIsResult bool
 }
 
 const deserializationErrorHelp = `
@@ -62,11 +68,15 @@ func ExecuteSeedFunc(ctx *aflow.Context, args ExecuteSeedArgs) (string, error) {
 		return "", err
 	}
 
-	desc := fmt.Sprintf("seed-exec: kernel commit %v, kernel config hash %v, image hash %v,"+
+	kind := "seed-exec"
+	if args.CrashIsResult {
+		kind = "recon-exec"
+	}
+	desc := fmt.Sprintf("%s: kernel commit %v, kernel config hash %v, image hash %v,"+
 		" vm %v, vm config hash %v, syz repro hash %v",
-		args.KernelCommit, hash.String(args.KernelConfig), imageHash.String(),
+		kind, args.KernelCommit, hash.String(args.KernelConfig), imageHash.String(),
 		args.Type, hash.String(args.VM), hash.String(fullSyz))
-	cached, cachedID, err := aflow.CacheObject(ctx, "seed-exec", desc, func() (cachedExecution, error) {
+	cached, cachedID, err := aflow.CacheObject(ctx, kind, desc, func() (cachedExecution, error) {
 		var res cachedExecution
 		res.GeneratedSyz = args.ReproSyz
 
@@ -75,15 +85,37 @@ func ExecuteSeedFunc(ctx *aflow.Context, args ExecuteSeedArgs) (string, error) {
 			return res, fmt.Errorf("failed to get runner manager: %w", err)
 		}
 
+		before := 0
+		if args.CrashIsResult {
+			before = len(rm.RecentCrashes())
+		}
 		runRes, err := rm.Submit(ctx.Context, p)
 		if err != nil {
+			if args.CrashIsResult {
+				// the crash this program caused can tear down the submit itself; the
+				// report is the result, not the transport error
+				if crashes := rm.RecentCrashes(); len(crashes) > before {
+					res.BugTitle = crashes[before].Title
+					res.Report = string(crashes[before].Report)
+					return res, nil
+				}
+			}
 			return res, aflow.FlowError(fmt.Errorf("RunnerManager Submit failed: %w", err))
 		}
 
 		log.Logf(1, "VM Console Output:\n%s", runRes.Output)
 
 		crashes := rm.RecentCrashes()
-		if len(crashes) > 0 {
+		if args.CrashIsResult {
+			crashes = crashes[before:]
+			if len(crashes) > 0 {
+				res.BugTitle = crashes[0].Title
+				res.Report = string(crashes[0].Report)
+				for _, rep := range crashes[1:] {
+					res.OtherReports = append(res.OtherReports, string(rep.Report))
+				}
+			}
+		} else if len(crashes) > 0 {
 			res.BugTitle = crashes[0].Title
 			res.Report = fmt.Sprintf("The kernel crashed after one of the previous executions:\n%s", string(crashes[0].Report))
 			for _, rep := range crashes[1:] {
@@ -113,11 +145,22 @@ func ExecuteSeedFunc(ctx *aflow.Context, args ExecuteSeedArgs) (string, error) {
 	if cached.Error != "" {
 		return "", errors.New(cached.Error)
 	}
-	if cached.BugTitle != "" {
+	if cached.BugTitle != "" && !args.CrashIsResult {
 		return "", fmt.Errorf("kernel crashed: %s", cached.BugTitle)
 	}
 
 	return cachedID, nil
+}
+
+// LoadCrash returns the crash a cached execution recorded and its report. With recon-exec
+// semantics (ExecuteSeedArgs.CrashIsResult) that is the crash this program triggered; an
+// empty title means it ran without crashing.
+func LoadCrash(ctx *aflow.Context, cachedID string) (string, string, error) {
+	cached, err := aflow.RetrieveObject[cachedExecution](ctx, cachedID)
+	if err != nil {
+		return "", "", err
+	}
+	return cached.BugTitle, cached.Report, nil
 }
 
 func extractCallErrors(info *flatrpc.ProgInfo, calls []*prog.Call) []CallError {
