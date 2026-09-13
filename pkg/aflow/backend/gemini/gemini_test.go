@@ -25,7 +25,7 @@ func TestProviderResolveModels(t *testing.T) {
 		{
 			name:     "resolves core model pool",
 			category: backend.CoreModel,
-			want:     []string{"gemini-3.7-flash"},
+			want:     []string{"gemini-3.7-flash", "gemini-3.1-pro-preview"},
 		},
 		{
 			name:     "resolves lightweight model pool",
@@ -175,6 +175,14 @@ func TestTransientErrorsRetry(t *testing.T) {
 	retryable(t, parseLLMResp(&genai.GenerateContentResponse{
 		PromptFeedback: &genai.GenerateContentResponsePromptFeedback{},
 	}), "blocked prompt")
+
+	// A hung request must NOT be a RetryError: the identical retry hangs again, and only a
+	// plain error lets the model loop fall back to the next model in the pool.
+	if _, err := (&client{p: &Provider{}}).hungRequestError("m"); err == nil {
+		t.Errorf("hung request: got nil, want an error")
+	} else if hung := new(backend.RetryError); errors.As(err, &hung) {
+		t.Errorf("hung request: got a RetryError, want plain error")
+	}
 
 	// A daily quota is not "not now", it is "not today": retrying inside one run only burns its
 	// wall budget, so it stays fatal here and the campaign layer requeues the run instead.

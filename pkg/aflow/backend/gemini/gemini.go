@@ -123,7 +123,13 @@ func (p *Provider) ResolveModels(category backend.ModelCategory) []string {
 	case backend.DeepReasoningModel:
 		return []string{"gemini-3.1-pro-preview"}
 	case backend.CoreModel:
-		return []string{"gemini-3.7-flash"}
+		// Pro as the fallback, not a second flash. On 2026-09-12/13 ~3% of flash tool calls
+		// (recon-code-fixer, reachability-analyzer) hung until the 10-minute request timeout
+		// and then hung again on the identical retry, while Pro carried 6M TPM peaks without
+		// one error; six of eight substrate runs sat frozen on such a call for an hour. With a
+		// single-entry pool there was nowhere to go. The hang path below now returns a plain
+		// error, so llm_agent's model loop moves here after one timeout instead of after 100.
+		return []string{"gemini-3.7-flash", "gemini-3.1-pro-preview"}
 	case backend.LightweightModel:
 		return []string{"gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"}
 	default:
@@ -200,9 +206,13 @@ func (c *client) GenerateContent(ctx context.Context, model string, cfg *backend
 	resp, err := c.p.client.Models.GenerateContent(timedCtx, c.p.modelPathPrefix+model, req, genaiCfg)
 	if err != nil {
 		if timedCtx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
-			// The internal 10-minute timeout expired, but the parent context is still alive.
-			// This means the LLM request hung. We should retry.
-			return nil, &backend.RetryError{Delay: time.Second, Err: err}
+			// The internal 10-minute timeout expired, but the parent context is still alive:
+			// the request hung. Not a RetryError -- a retry re-issues the identical request,
+			// and a request that hung once mostly hangs again, so retrying it up to
+			// maxLLMRetryIters times cost 100 x 10 min with nothing to show. A plain error
+			// makes llm_agent's model loop break to the next model in the category's pool
+			// (CoreModel now falls back to Pro), which is what actually unblocks the call.
+			return c.hungRequestError(model)
 		}
 		return nil, parseLLMError(err, model)
 	}
@@ -215,6 +225,12 @@ func (c *client) GenerateContent(ctx context.Context, model string, cfg *backend
 }
 
 var rePleaseRetry = regexp.MustCompile(`Please retry in (\d+)s\.`)
+
+// hungRequestError is what a request that outlived the 10-minute timeout returns. Plain, not
+// RetryError, on purpose: see the caller.
+func (c *client) hungRequestError(model string) (*backend.GenerateResponse, error) {
+	return nil, fmt.Errorf("request to %v hung for 10 minutes: %w", model, context.DeadlineExceeded)
+}
 
 func parseLLMError(err error, model string) error {
 	var apiErr genai.APIError
