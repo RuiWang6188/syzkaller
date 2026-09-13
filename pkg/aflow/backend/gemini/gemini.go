@@ -144,9 +144,22 @@ func (p *Provider) ResolveModels(category backend.ModelCategory) []string {
 		// `recon` are supposed to share -- the whole point of putting only the DRIVING agent on
 		// Pro -- and it did so at a rate set by whichever arm happened to meet a refusal, so the
 		// shared substrate differed between arms by chance. Staying in-family keeps every arm's
-		// helper tier identical and the cost flash-tier. All four verified callable on
-		// 2026-09-13.
-		return []string{"gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"}
+		// helper tier identical and the cost flash-tier.
+		//
+		// gemini-3.8-flash is NOT in the pool, on measurement rather than taste. It led the pool
+		// from 08:49 on 2026-09-13, and for six hours the campaign ran both chains at once --
+		// runs launched before the rebuild still led with 3.7-flash -- which is a same-clock,
+		// same-key, same-workload comparison of the two leaders:
+		//
+		//     3.8 first: 3370 flash calls, 153 give-ups = 4.5%
+		//     3.7 first: 2833 flash calls,  49 give-ups = 1.7%
+		//
+		// 2.6x, holding in five of six hours. A give-up is one call abandoning one model, not a
+		// retry line, so this is per-call and not inflated by the retry loop. The cost is
+		// wall-clock rather than verdicts (each give-up falls through), but at 4.5% it is the
+		// largest avoidable tax on the tool tier. Rui, 2026-09-13: «可能3.8还不够稳定».
+		// Anything reinstating 3.8 should re-run that comparison first.
+		return []string{"gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"}
 	case backend.LightweightModel:
 		return []string{"gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"}
 	default:
