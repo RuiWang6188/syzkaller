@@ -25,7 +25,10 @@ func TestProviderResolveModels(t *testing.T) {
 		{
 			name:     "resolves core model pool",
 			category: backend.CoreModel,
-			want:     []string{"gemini-3.7-flash", "gemini-3.1-pro-preview"},
+			// Flash family only: the tool tier is shared by every arm of the experiment, so a
+			// fallback to Pro would silently upgrade it for whichever arm happened to meet a
+			// refusal (Rui, 2026-09-13).
+			want: []string{"gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"},
 		},
 		{
 			name:     "resolves lightweight model pool",
@@ -176,13 +179,23 @@ func TestTransientErrorsRetry(t *testing.T) {
 		PromptFeedback: &genai.GenerateContentResponsePromptFeedback{},
 	}), "blocked prompt")
 
-	// A hung request must NOT be a RetryError: the identical retry hangs again, and only a
-	// plain error lets the model loop fall back to the next model in the pool.
-	if _, err := (&client{p: &Provider{}}).hungRequestError("m"); err == nil {
+	// A hung request must NOT be a RetryError -- the identical retry hangs again, and only a
+	// non-retry error lets the model loop fall back at once -- but it must carry
+	// HungRequestError so the loop can tell it apart on the LAST model, where falling back is
+	// not an option and ending the flow cost three runs on 2026-09-13.
+	_, err := (&client{p: &Provider{}}).hungRequestError("m")
+	if err == nil {
 		t.Errorf("hung request: got nil, want an error")
-	} else if hung := new(backend.RetryError); errors.As(err, &hung) {
-		t.Errorf("hung request: got a RetryError, want plain error")
 	}
+	if r := new(backend.RetryError); errors.As(err, &r) {
+		t.Errorf("hung request: got a RetryError, want a plain HungRequestError")
+	}
+	if h := new(backend.HungRequestError); !errors.As(err, &h) {
+		t.Errorf("hung request: got %T, want *backend.HungRequestError", err)
+	}
+
+	// Zero candidates with no PromptFeedback ("empty model response") is transient too.
+	retryable(t, parseLLMResp(&genai.GenerateContentResponse{}), "empty model response")
 
 	// A daily quota is not "not now", it is "not today": retrying inside one run only burns its
 	// wall budget, so it stays fatal here and the campaign layer requeues the run instead.

@@ -126,6 +126,20 @@ type Provider interface {
 }
 
 // RetryError indicates that the request failed but should be retried.
+// HungRequestError is a request that outlived the provider's own request timeout. It is NOT a
+// RetryError: a request that hung once mostly hangs again, and each attempt costs the full
+// timeout, so the model loop should move to the next model in the pool at once. On the LAST
+// model there is nowhere to move, and returning it ends the flow -- which killed three runs on
+// 2026-09-13 (repro/683f6c07, rcond/323f07d3, norcond/21f86285, 13 min to 3 h of work each).
+// llm_agent retries it a bounded number of times there; see maxHungRetriesOnLastModel.
+type HungRequestError struct {
+	Err error
+}
+
+func (e *HungRequestError) Error() string { return e.Err.Error() }
+
+func (e *HungRequestError) Unwrap() error { return e.Err }
+
 type RetryError struct {
 	Delay         time.Duration
 	IsExponential bool

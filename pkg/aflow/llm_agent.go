@@ -892,9 +892,17 @@ const (
 	// of the identical request got the same answer, and with the pool's fallback reachable only
 	// after 100 tries (up to 3 min each) six of eight substrate runs sat frozen for an hour on
 	// a call Pro would have answered in seconds -- and cache.Create holds its mutex across the
-	// call, so the whole run froze with it. Six tries is 1-6 minutes under the backend's
-	// delays; then the next model gets the request.
-	maxLLMRetriesBeforeFallback = 6
+	// call, so the whole run froze with it.
+	//
+	// Two, not six. Measured on 2026-09-13 at six: eight give-ups in one hour cost 56 of the
+	// fleet's 780 run-minutes (7%), about seven minutes each, and the retries almost never
+	// succeeded -- the switch did. CoreModel's pool is four flash models, so two tries each
+	// still gives a request eight attempts before the family is exhausted.
+	maxLLMRetriesBeforeFallback = 2
+	// How many times to re-issue a request that outlived the provider's timeout when there is
+	// no next model to fall back to. Each attempt costs the full 10-minute timeout, so this is
+	// small; the point is that the flow survives a single hang instead of ending on it.
+	maxHungRetriesOnLastModel = 2
 )
 
 func (a *LLMAgent) generateContent(ctx *Context, cfg *backend.GenerateConfig,
@@ -911,15 +919,31 @@ func (a *LLMAgent) generateContent(ctx *Context, cfg *backend.GenerateConfig,
 			span.Model = m
 		}
 		retryLimit := maxLLMRetryIters
-		if mi < len(resolvedModels)-1 {
+		last := mi == len(resolvedModels)-1
+		if !last {
 			retryLimit = maxLLMRetriesBeforeFallback
 		}
+		hungTries := 0
 		for try := 0; ; try++ {
 			resp, err := a.generateContentCached(ctx, cfg, req, candidate, try, m)
+			// A hung request is deliberately not a RetryError: re-issuing it costs another full
+			// timeout, so with a fallback available the right move is to take it at once. On the
+			// last model there is none, and returning the error ends the flow -- three runs died
+			// that way on 2026-09-13. Retry it a couple of times there instead.
+			if hungErr := new(backend.HungRequestError); errors.As(err, &hungErr) && last {
+				if hungTries < maxHungRetriesOnLastModel {
+					hungTries++
+					log.Printf("request to %v hung (try %v/%v, no fallback left); retrying: %v",
+						m, hungTries, maxHungRetriesOnLastModel, hungErr.Err)
+					continue
+				}
+				log.Printf("request to %v hung %v times and there is no fallback; giving up",
+					m, hungTries+1)
+			}
 			if retryErr := new(backend.RetryError); errors.As(err, &retryErr) {
 				if try >= retryLimit {
 					lastErr = retryErr.Err
-					if mi < len(resolvedModels)-1 {
+					if !last {
 						// Say so: a retry loop is otherwise invisible in the log, and this is
 						// the only place that knows a model was given up on.
 						log.Printf("giving up on model %v after %v retries (%v); trying %v",
@@ -927,6 +951,11 @@ func (a *LLMAgent) generateContent(ctx *Context, cfg *backend.GenerateConfig,
 					}
 					break // stop retrying this model
 				}
+				// Every retry, not only the give-up. The loop sleeps and continues in silence,
+				// so throttling on the LAST model -- which never reaches a give-up -- left no
+				// trace at all: on 2026-09-13 it could only be inferred afterwards from spans
+				// that burned ten minutes for thirty output tokens.
+				log.Printf("retrying model %v (try %v/%v): %v", m, try+1, retryLimit, retryErr.Err)
 				delay := retryErr.Delay
 				if retryErr.IsExponential {
 					delay = backend.BackoffDuration(try, retryErr.Delay)

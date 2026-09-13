@@ -61,6 +61,15 @@ func (p *Provider) init(ctx context.Context, cfg Config) error {
 	}
 
 	p.models = map[string]*modelInfo{
+		"gemini-3.8-flash": {
+			Thinking: true,
+			// Verified against the API on 2026-09-13: thinkingLevel MINIMAL returns
+			// "Thinking level MINIMAL is not supported for this model", LOW is accepted.
+			MinThinkingLevel: backend.ThinkingLevelLow,
+			MaxTemperature:   2.0,
+			InputTokenLimit:  1048576,
+			OutputTokenLimit: 65536,
+		},
 		"gemini-3.7-flash": {
 			Thinking: true,
 			// Gemini 3.7 Flash does not support MINIMAL thinking.
@@ -123,13 +132,21 @@ func (p *Provider) ResolveModels(category backend.ModelCategory) []string {
 	case backend.DeepReasoningModel:
 		return []string{"gemini-3.1-pro-preview"}
 	case backend.CoreModel:
-		// Pro as the fallback, not a second flash. On 2026-09-12/13 ~3% of flash tool calls
-		// (recon-code-fixer, reachability-analyzer) hung until the 10-minute request timeout
-		// and then hung again on the identical retry, while Pro carried 6M TPM peaks without
-		// one error; six of eight substrate runs sat frozen on such a call for an hour. With a
-		// single-entry pool there was nowhere to go. The hang path below now returns a plain
-		// error, so llm_agent's model loop moves here after one timeout instead of after 100.
-		return []string{"gemini-3.7-flash", "gemini-3.1-pro-preview"}
+		// A pool, because a single entry left the model loop nowhere to go: on 2026-09-12/13
+		// gemini-3.7-flash answered a few percent of tool requests with 429 / 503 / a
+		// zero-candidate reply, the identical retry got the same answer, and six of eight
+		// substrate runs sat frozen on one call for an hour.
+		//
+		// The fallbacks stay inside the flash family (Rui, 2026-09-13: «我觉得可以尝试
+		// gemini-3.8-flash, gemini-3.7-flash, gemini-3.6-flash和gemini-3.5-flash同flash级别的
+		// 模型，不要变成pro类型的»). An earlier version fell back to gemini-3.1-pro-preview,
+		// which was wrong twice over: it silently upgraded the tool tier that `repro` and
+		// `recon` are supposed to share -- the whole point of putting only the DRIVING agent on
+		// Pro -- and it did so at a rate set by whichever arm happened to meet a refusal, so the
+		// shared substrate differed between arms by chance. Staying in-family keeps every arm's
+		// helper tier identical and the cost flash-tier. All four verified callable on
+		// 2026-09-13.
+		return []string{"gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"}
 	case backend.LightweightModel:
 		return []string{"gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"}
 	default:
@@ -229,7 +246,9 @@ var rePleaseRetry = regexp.MustCompile(`Please retry in (\d+)s\.`)
 // hungRequestError is what a request that outlived the 10-minute timeout returns. Plain, not
 // RetryError, on purpose: see the caller.
 func (c *client) hungRequestError(model string) (*backend.GenerateResponse, error) {
-	return nil, fmt.Errorf("request to %v hung for 10 minutes: %w", model, context.DeadlineExceeded)
+	return nil, &backend.HungRequestError{
+		Err: fmt.Errorf("request to %v hung for 10 minutes: %w", model, context.DeadlineExceeded),
+	}
 }
 
 func parseLLMError(err error, model string) error {
@@ -297,7 +316,11 @@ func parseLLMResp(resp *genai.GenerateContentResponse) error {
 				"request blocked: %v %v", resp.PromptFeedback.BlockReason,
 				resp.PromptFeedback.BlockReasonMessage)}
 		}
-		return fmt.Errorf("empty model response")
+		// Retry, like its sibling above. Zero candidates with no feedback at all is a provider
+		// hiccup, not a verdict, and it was still fatal after the blocked-prompt branch was
+		// made retryable on 2026-09-12: three runs died on it that night, one of them 3.0 h in
+		// (repro/2860e758) and one 55 min in (rcond/21f86285).
+		return &backend.RetryError{Delay: time.Minute, Err: errors.New("empty model response")}
 	}
 	candidate := resp.Candidates[0]
 	if candidate.Content == nil || len(candidate.Content.Parts) == 0 {
