@@ -152,6 +152,42 @@ func TestParseLLMErrorBackoff(t *testing.T) {
 	}
 }
 
+// Every status that says "not now" must be retryable, not fatal. Each case below was fatal
+// before: the 5xx list enumerated 500/502/503/504 so a gateway's 529 killed the run, a 429 whose
+// wording matched none of three message patterns fell through to the fatal return, and a response
+// with no candidates aborted the flow outright -- which on 2026-09-12 cost 24 runs inside one
+// three-hour window, several of them multi-hour.
+func TestTransientErrorsRetry(t *testing.T) {
+	retryable := func(t *testing.T, err error, what string) {
+		t.Helper()
+		var rErr *backend.RetryError
+		if !errors.As(err, &rErr) {
+			t.Errorf("%s: got %T (%v), want *backend.RetryError", what, err, err)
+		}
+	}
+	for _, code := range []int{500, 502, 503, 504, 520, 524, 529, 539, 599, 499} {
+		retryable(t, parseLLMError(genai.APIError{Code: code}, "m"), fmt.Sprintf("status %d", code))
+	}
+	retryable(t, parseLLMError(genai.APIError{
+		Code:    429,
+		Message: "some wording we have never seen before",
+	}, "m"), "unrecognised 429")
+	retryable(t, parseLLMResp(&genai.GenerateContentResponse{
+		PromptFeedback: &genai.GenerateContentResponsePromptFeedback{},
+	}), "blocked prompt")
+
+	// A daily quota is not "not now", it is "not today": retrying inside one run only burns its
+	// wall budget, so it stays fatal here and the campaign layer requeues the run instead.
+	dq := parseLLMError(genai.APIError{
+		Code:    429,
+		Message: "Quota exceeded for metric: generate_requests_per_model_per_day, limit: 100",
+	}, "m")
+	var rErr *backend.RetryError
+	if errors.As(dq, &rErr) {
+		t.Errorf("daily quota: got a RetryError, want fatal")
+	}
+}
+
 func TestToGenaiContentEmptyTextParts(t *testing.T) {
 	msg := &backend.Message{
 		Role: backend.RoleModel,

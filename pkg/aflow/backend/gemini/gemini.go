@@ -223,7 +223,11 @@ func parseLLMError(err error, model string) error {
 	}
 	// 499 has server-dependent meaning, but for genapi we observed these
 	// when a request was cancelled on some internal error.
-	if apiErr.Code == 503 || apiErr.Code == 502 || apiErr.Code == 504 || apiErr.Code == 499 {
+	// Every 5xx, not an enumerated few: a server-side status is transient by definition, and the
+	// enumeration (500/502/503/504) silently made everything else fatal -- 529 and 539 from a
+	// gateway, Cloudflare's 520-524 -- killing a multi-hour agent run on a status that says
+	// "try again". 500 had its own identical branch further down; this subsumes it.
+	if apiErr.Code == 499 || (apiErr.Code >= 500 && apiErr.Code <= 599) {
 		return &backend.RetryError{Delay: time.Second, IsExponential: true, Err: err}
 	}
 	if apiErr.Code == 429 && strings.Contains(apiErr.Message, "Quota exceeded for metric") {
@@ -248,12 +252,15 @@ func parseLLMError(err error, model string) error {
 		// Vertex AI specific rate limit error (e.g. RPM/TPM exhausted).
 		return &backend.RetryError{Delay: time.Minute, Err: err}
 	}
+	if apiErr.Code == 429 {
+		// Any other 429. The three branches above match specific message bodies, and a 429 whose
+		// wording is not among them fell through to the fatal return -- but 429 never means the
+		// request was wrong, only that it came too soon, so the correct response to every one of
+		// them is to wait. Retries are bounded (llm_agent.go: maxLLMRetryIters).
+		return &backend.RetryError{Delay: time.Minute, Err: err}
+	}
 	if apiErr.Code == 400 && strings.Contains(apiErr.Message, "The input token count exceeds the maximum") {
 		return &backend.InputTokenOverflowError{Err: err}
-	}
-	if apiErr.Code == 500 {
-		// Let's assume ISE is just something temporal on the server side.
-		return &backend.RetryError{Delay: time.Second, IsExponential: true, Err: err}
 	}
 	return err
 }
@@ -261,7 +268,18 @@ func parseLLMError(err error, model string) error {
 func parseLLMResp(resp *genai.GenerateContentResponse) error {
 	if len(resp.Candidates) == 0 || resp.Candidates[0] == nil {
 		if resp.PromptFeedback != nil {
-			return fmt.Errorf("request blocked: %v", resp.PromptFeedback.BlockReasonMessage)
+			// Retry, do not abort the flow. This was fatal, on the assumption that a refusal is
+			// a content-policy decision and so deterministic. 2026-09-12 refuted it: 24 runs
+			// across three arms died on this inside one 18:13-21:15 window and none outside it,
+			// and replaying a blocked prompt verbatim afterwards returned a normal candidate.
+			// A fatal error here costs the whole run -- one bug lost 3.8h on one arm and 6.0h on
+			// another. A fixed delay rather than exponential keeps the worst case predictable
+			// (maxLLMRetryIters x 1min) instead of letting backoff eat the run's wall budget.
+			// BlockReason as well as BlockReasonMessage: the message was empty every time, so the
+			// log said only "request blocked:" and named nothing.
+			return &backend.RetryError{Delay: time.Minute, Err: fmt.Errorf(
+				"request blocked: %v %v", resp.PromptFeedback.BlockReason,
+				resp.PromptFeedback.BlockReasonMessage)}
 		}
 		return fmt.Errorf("empty model response")
 	}
