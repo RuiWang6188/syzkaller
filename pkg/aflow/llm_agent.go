@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"log"
 	"maps"
 	"reflect"
 	"regexp"
@@ -884,6 +885,16 @@ func (a *LLMAgent) parseResponse(resp *backend.GenerateResponse, span *trajector
 const (
 	maxLLMRetryIters = 100
 	maxLLMBackoff    = 3 * time.Minute
+	// How long to keep retrying one model when the category's pool has another behind it.
+	// maxLLMRetryIters is the right budget for the LAST model, which has nowhere to go and must
+	// outlast a real rate-limit storm. It is the wrong budget for the first: on 2026-09-13
+	// gemini-3.7-flash answered a few percent of tool requests with a fast error, every retry
+	// of the identical request got the same answer, and with the pool's fallback reachable only
+	// after 100 tries (up to 3 min each) six of eight substrate runs sat frozen for an hour on
+	// a call Pro would have answered in seconds -- and cache.Create holds its mutex across the
+	// call, so the whole run froze with it. Six tries is 1-6 minutes under the backend's
+	// delays; then the next model gets the request.
+	maxLLMRetriesBeforeFallback = 6
 )
 
 func (a *LLMAgent) generateContent(ctx *Context, cfg *backend.GenerateConfig,
@@ -895,15 +906,25 @@ func (a *LLMAgent) generateContent(ctx *Context, cfg *backend.GenerateConfig,
 
 	resolvedModels := ctx.provider.ResolveModels(model)
 	var lastErr error
-	for _, m := range resolvedModels {
+	for mi, m := range resolvedModels {
 		if span != nil {
 			span.Model = m
+		}
+		retryLimit := maxLLMRetryIters
+		if mi < len(resolvedModels)-1 {
+			retryLimit = maxLLMRetriesBeforeFallback
 		}
 		for try := 0; ; try++ {
 			resp, err := a.generateContentCached(ctx, cfg, req, candidate, try, m)
 			if retryErr := new(backend.RetryError); errors.As(err, &retryErr) {
-				if try >= maxLLMRetryIters {
+				if try >= retryLimit {
 					lastErr = retryErr.Err
+					if mi < len(resolvedModels)-1 {
+						// Say so: a retry loop is otherwise invisible in the log, and this is
+						// the only place that knows a model was given up on.
+						log.Printf("giving up on model %v after %v retries (%v); trying %v",
+							m, try, retryErr.Err, resolvedModels[mi+1])
+					}
 					break // stop retrying this model
 				}
 				delay := retryErr.Delay
