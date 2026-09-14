@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/google/syzkaller/pkg/aflow"
+	"github.com/google/syzkaller/pkg/aflow/syzspec"
 	"github.com/google/syzkaller/pkg/flatrpc"
 	"github.com/google/syzkaller/pkg/fuzzer/queue"
 	"github.com/google/syzkaller/pkg/hash"
@@ -56,6 +57,18 @@ func ExecuteSeedFunc(ctx *aflow.Context, args ExecuteSeedArgs) (string, error) {
 	}
 
 	fullSyz := ctx.RestoreBlobs(args.ReproSyz)
+	// Every program reaches the VM through here, so this is the one place worth checking that
+	// each placeholder actually resolved. RestoreBlobs leaves an unknown one standing, which
+	// would send a 20-byte literal to the kernel in place of a filesystem image and fail as an
+	// ordinary mount error. Name it instead, so the agent can copy the token again.
+	if syzspec.SeedBlobsEnabled() {
+		if left := syzspec.UnresolvedBlobs(fullSyz); len(left) > 0 {
+			return "", aflow.BadCallError("the program carries %d blob placeholder(s) that do not "+
+				"resolve: %v. A placeholder must be copied from tool output exactly, all 12 hex "+
+				"digits; it cannot be invented, abbreviated or edited. Re-read the line it came "+
+				"from and copy the token verbatim.", len(left), left)
+		}
+	}
 	// We perform normalization so that the cache key is calculated correctly.
 	mode := prog.Strict
 	if args.Lenient {

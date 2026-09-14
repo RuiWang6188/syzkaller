@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"os"
 	"regexp"
 	"strings"
 	"unicode/utf8"
@@ -399,7 +398,7 @@ func limitOutputBytes(res string) string {
 // read identically either way; 726 of the 736 affected lines are syz_mount_image seeds. With the
 // gate off the output is byte-identical to before, because the registrar is the identity.
 func seedBlobsEnabled() bool {
-	return os.Getenv("RECON_SEED_BLOBS") == "1"
+	return syzspec.SeedBlobsEnabled()
 }
 
 // blobRegistrar returns what each output line is passed through before the length check. The
