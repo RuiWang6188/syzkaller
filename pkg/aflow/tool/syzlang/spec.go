@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
 	"regexp"
 	"strings"
 	"unicode/utf8"
@@ -109,13 +110,14 @@ type specToolsState struct {
 
 func readSyzSpec(ctx *aflow.Context, state specToolsState, args readSyzSpecArgs) (readSyzSpecResults, error) {
 	cleanedFile := state.SyzFS.CleanPath(args.File)
-	res, err := paginateSyzSpec(state.SyzFS, cleanedFile, args.FirstLine, args.LineCount)
+	res, err := paginateSyzSpec(state.SyzFS, cleanedFile, args.FirstLine, args.LineCount,
+		blobRegistrar(ctx))
 	return readSyzSpecResults{Output: res}, err
 }
 
 func syzGrepper(ctx *aflow.Context, state specToolsState, args syzGrepperArgs) (syzGrepperResults, error) {
 	cleanedFile := state.SyzFS.CleanPath(args.PathPrefix)
-	res, err := grepSyzSpec(state.SyzFS, args.Expression, cleanedFile)
+	res, err := grepSyzSpec(state.SyzFS, args.Expression, cleanedFile, blobRegistrar(ctx))
 	return syzGrepperResults{Output: res}, err
 }
 
@@ -153,7 +155,7 @@ func resolveTargetFiles(syzFS *syzspec.SyzFS, file string) ([]string, error) {
 	return []string{file}, nil
 }
 
-func grepSyzSpec(syzFS *syzspec.SyzFS, expression, file string) (string, error) {
+func grepSyzSpec(syzFS *syzspec.SyzFS, expression, file string, reg func(string) string) (string, error) {
 	re, err := regexp.Compile(expression)
 	if err != nil {
 		return "", aflow.BadCallError("bad expression: %v", err)
@@ -166,6 +168,7 @@ func grepSyzSpec(syzFS *syzspec.SyzFS, expression, file string) (string, error) 
 	state := grepState{
 		b:           new(strings.Builder),
 		targetFiles: targetFiles,
+		reg:         reg,
 	}
 
 	for _, fname := range targetFiles {
@@ -235,6 +238,8 @@ type grepState struct {
 	fname             string
 	targetFiles       []string
 	firstMatchPrinted bool
+	// Applied to every emitted line before the length check; see blobRegistrar.
+	reg func(string) string
 }
 
 func (s *grepState) appendLine(num int, text, sep string) {
@@ -247,7 +252,7 @@ func (s *grepState) appendLine(num int, text, sep string) {
 	} else {
 		prefix = fmt.Sprintf("%s:%d%s\t", s.fname, num, sep)
 	}
-	truncatedLine := truncateLine(text)
+	truncatedLine := truncateLine(s.reg(text))
 	s.b.WriteString(prefix)
 	s.b.WriteString(truncatedLine)
 	s.b.WriteByte('\n')
@@ -308,7 +313,7 @@ func (s *grepState) processLine(line string, lineNum int, matched bool) {
 }
 
 func paginateSyzSpec(syzFS *syzspec.SyzFS, file string, firstLine,
-	lineCount int) (string, error) {
+	lineCount int, reg func(string) string) (string, error) {
 	if file == "" {
 		return "", aflow.BadCallError("File must be provided")
 	}
@@ -345,7 +350,7 @@ func paginateSyzSpec(syzFS *syzspec.SyzFS, file string, firstLine,
 
 	for count < lineCount && scanner.Scan() {
 		line := scanner.Text()
-		truncatedLine := truncateLine(line)
+		truncatedLine := truncateLine(reg(line))
 
 		lineStr := fmt.Sprintf("%4d:\t%s\n", lineNum, truncatedLine)
 		b.WriteString(lineStr)
@@ -373,6 +378,42 @@ func limitOutputBytes(res string) string {
 		return res + msg
 	}
 	return res
+}
+
+// seedBlobsEnabled reports whether a long string literal in tool output should be registered as
+// a $BLOB_ placeholder instead of being horizontally truncated. OFF unless RECON_SEED_BLOBS=1.
+//
+// Why it exists. A filesystem-image test seed carries the whole image as ONE string literal:
+// sys/linux/test/syz_mount_image_jfs_0 line 6 is 32,080 characters, 31,991 of them inside the
+// quotes. truncateLine hands the agent the first 500 and appends a note saying the rest need not
+// be reconstructed -- true for a descriptor array, false for an image payload, and the agent
+// cannot mount JFS/btrfs/UDF/NTFS3 at all as a result. The machinery that solves this already
+// exists (syzspec.BlobStore, minBlobLen 128): the line collapses to ~109 characters, the agent
+// pastes the placeholder into its program, and RestoreBlobs substitutes the image back before
+// execution. It was simply never wired to the two tools that read test seeds -- ReplaceBlobs is
+// called only from get-corpus-programs (corpus_search.go) and crash/reproduce.go.
+//
+// Why it is gated. Turning it on changes what an agent can DO, and a benchmark scored half under
+// each regime cannot be compared. Blast radius, measured across the whole spec tree: of 461
+// description files and 82,261 lines, ZERO carry a literal of at least minBlobLen, so those files
+// read identically either way; 726 of the 736 affected lines are syz_mount_image seeds. With the
+// gate off the output is byte-identical to before, because the registrar is the identity.
+func seedBlobsEnabled() bool {
+	return os.Getenv("RECON_SEED_BLOBS") == "1"
+}
+
+// blobRegistrar returns what each output line is passed through before the length check. The
+// order matters: registering first lets a line carrying an image shrink below maxLineLen so the
+// truncation branch is never reached, while a line with no long literal comes back unchanged and
+// truncates exactly as it did before.
+func blobRegistrar(ctx *aflow.Context) func(string) string {
+	// A nil ctx carries no blob store, so there is nowhere to register and nothing that could
+	// later restore. Several tool unit tests call these tools with nil; a gate flipped on in the
+	// environment must not turn that into a panic.
+	if ctx == nil || !seedBlobsEnabled() {
+		return func(s string) string { return s }
+	}
+	return ctx.ReplaceBlobs
 }
 
 func truncateLine(line string) string {
