@@ -1001,6 +1001,10 @@ func (a *LLMAgent) generateContentCached(ctx *Context, cfg *backend.GenerateConf
 	desc := fmt.Sprintf("model %v, config hash %v, request hash %v, candidate %v",
 		model, hash.String(cfg), hash.String(req), candidate)
 	cached, _, err := CacheObject(ctx, "llm", desc, func() (Cached, error) {
+		// Only a real request is rate-limited; a cache hit sends nothing.
+		if err := backend.LimitAcquire(ctx.Context, model, backend.EstimateTokens(req)); err != nil {
+			return Cached{}, err
+		}
 		resp, err := ctx.generateContent(model, cfg, req)
 		return Cached{
 			Config:  cfg,

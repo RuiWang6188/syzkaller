@@ -28,7 +28,7 @@ func TestProviderResolveModels(t *testing.T) {
 			// Flash family only: the tool tier is shared by every arm of the experiment, so a
 			// fallback to Pro would silently upgrade it for whichever arm happened to meet a
 			// refusal (Rui, 2026-09-13).
-			want: []string{"gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"},
+			want: []string{"gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"}, // 3.8 left the pool in e003ace5d
 		},
 		{
 			name:     "resolves lightweight model pool",
@@ -92,7 +92,8 @@ func TestParseLLMError(t *testing.T) {
 				Message: `Resource has been exhausted (e.g. check quota).`,
 			},
 			outputErr: &backend.RetryError{
-				Delay: time.Minute,
+				Delay:         quota429Delay,
+				IsExponential: true,
 				Err: genai.APIError{
 					Code:    429,
 					Message: `Resource has been exhausted (e.g. check quota).`,

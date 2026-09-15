@@ -264,6 +264,13 @@ func (c *client) hungRequestError(model string) (*backend.GenerateResponse, erro
 	}
 }
 
+// A 429 that names no retry hint used to sleep a flat minute. Measured on 2026-09-15 over
+// 9,549 of them: the quota window is a minute, but the rejected requests of a dozen processes
+// slept the same minute and returned together (43% within two seconds of another process's
+// 429), and two flat minutes then cost a model switch. A short first sleep that doubles, with the
+// jitter llm_agent adds, spreads the retries out and keeps the second try inside the window.
+const quota429Delay = 15 * time.Second
+
 func parseLLMError(err error, model string) error {
 	var apiErr genai.APIError
 	if !errors.As(err, &apiErr) {
@@ -293,19 +300,19 @@ func parseLLMError(err error, model string) error {
 	if apiErr.Code == 429 && strings.Contains(apiErr.Message, "You exceeded your current quota") {
 		// Unclear what this is, the error does not contain details
 		// (see the test for exact error message). But presumably this is some per-minute quota.
-		return &backend.RetryError{Delay: time.Minute, Err: err}
+		return &backend.RetryError{Delay: quota429Delay, IsExponential: true, Err: err}
 	}
 	if apiErr.Code == 429 && (strings.Contains(apiErr.Message, "Resource exhausted. Please try again later.") ||
 		strings.Contains(apiErr.Message, "Resource has been exhausted")) {
 		// Vertex AI specific rate limit error (e.g. RPM/TPM exhausted).
-		return &backend.RetryError{Delay: time.Minute, Err: err}
+		return &backend.RetryError{Delay: quota429Delay, IsExponential: true, Err: err}
 	}
 	if apiErr.Code == 429 {
 		// Any other 429. The three branches above match specific message bodies, and a 429 whose
 		// wording is not among them fell through to the fatal return -- but 429 never means the
 		// request was wrong, only that it came too soon, so the correct response to every one of
 		// them is to wait. Retries are bounded (llm_agent.go: maxLLMRetryIters).
-		return &backend.RetryError{Delay: time.Minute, Err: err}
+		return &backend.RetryError{Delay: quota429Delay, IsExponential: true, Err: err}
 	}
 	if apiErr.Code == 400 && strings.Contains(apiErr.Message, "The input token count exceeds the maximum") {
 		return &backend.InputTokenOverflowError{Err: err}

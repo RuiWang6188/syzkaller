@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,7 +70,10 @@ func (flow *Flow) Execute(ctx context.Context, inputs map[string]any, opts Execu
 		c.timeNow = time.Now
 	}
 	if c.sleep == nil {
-		c.sleep = time.Sleep
+		// Jittered: the processes that share one API key used to sleep the same flat minute
+		// after a 429 and hit the quota together again (2026-09-15, 43% of 429s landed within
+		// two seconds of another process's). Tests inject their own sleep and see exact delays.
+		c.sleep = func(d time.Duration) { time.Sleep(jitterDelay(d)) }
 	}
 	if c.generateContent == nil {
 		c.generateContent = func(model string, cfg *backend.GenerateConfig,
@@ -393,4 +397,13 @@ func (ctx *Context) GetRunnerManager() (*RunnerManager, error) {
 		return nil, ErrRunnerNotInitialized
 	}
 	return ctx.runnerManager, nil
+}
+
+// jitterDelay spreads a retry sleep over [3/4 d, 5/4 d); delays under ten seconds are left as
+// they are, they are too short to synchronise anything.
+func jitterDelay(d time.Duration) time.Duration {
+	if d < 10*time.Second {
+		return d
+	}
+	return d*3/4 + time.Duration(rand.Int63n(int64(d/2)))
 }
